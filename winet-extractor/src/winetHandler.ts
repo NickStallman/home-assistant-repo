@@ -26,6 +26,9 @@ export class winetHandler {
   ) => void;
   private ws!: Websocket;
 
+  private winetUser = '';
+  private winetPass = '';
+
   private token = '';
   private currentDevice: number | undefined = undefined;
   private inFlightDevice: number | undefined = undefined;
@@ -40,12 +43,24 @@ export class winetHandler {
     logger: Winston.Logger,
     host: string,
     lang: string,
-    frequency: number
+    frequency: number,
+    winetUser: string,
+    winetPass: string
   ) {
     this.logger = logger;
     this.host = host;
     this.lang = lang;
     this.frequency = frequency;
+    if (winetUser) {
+      this.winetUser = winetUser;
+    } else {
+      this.winetUser = 'admin';
+    }
+    if (winetPass) {
+      this.winetPass = winetPass;
+    } else {
+      this.winetPass = 'pw8888';
+    }
   }
 
   public setProperties(properties: Properties): void {
@@ -106,7 +121,9 @@ export class winetHandler {
     const validationResult = MessageSchema.safeParse(message);
 
     if (!validationResult.success) {
-      this.logger.error('Invalid message:', validationResult.error);
+      this.logger.error('Invalid message:', {
+        data: message,
+      });
       return;
     }
 
@@ -120,7 +137,9 @@ export class winetHandler {
       case 'connect': {
         const connectResult = ConnectSchema.safeParse(result_data);
         if (!connectResult.success) {
-          this.logger.error('Invalid connect message:', connectResult.error);
+          this.logger.error('Invalid connect message:', {
+            data: message,
+          });
           return;
         }
         const connectData = connectResult.data;
@@ -131,7 +150,7 @@ export class winetHandler {
         }
         this.token = connectData.token;
 
-        this.logger.info('Connected to Winet');
+        this.logger.info('Connected to Winet, logging in');
 
         this.sendPacket({
           service: 'devicelist',
@@ -141,18 +160,25 @@ export class winetHandler {
 
         this.sendPacket({
           service: 'login',
-          username: 'admin',
-          passwd: 'pw8888',
+          username: this.winetUser,
+          passwd: this.winetPass,
         });
+        break;
+      }
+      case 'login': {
+        if (result_code === 1) {
+          this.logger.info('Authenticated successfully');
+        } else {
+          throw new Error('Failed to authenticate');
+        }
         break;
       }
       case 'devicelist': {
         const deviceListResult = DeviceListSchema.safeParse(result_data);
         if (!deviceListResult.success) {
-          this.logger.error(
-            'Invalid devicelist message:',
-            deviceListResult.error
-          );
+          this.logger.error('Invalid devicelist message:', {
+            data: message,
+          });
           return;
         }
         const deviceListData = deviceListResult.data;
@@ -187,8 +213,9 @@ export class winetHandler {
 
         const realtimeResult = RealtimeSchema.safeParse(result_data);
         if (!realtimeResult.success) {
-          this.logger.error('Invalid realtime message:', result_data);
-          console.log(result_data);
+          this.logger.error('Invalid realtime message:', {
+            data: message,
+          });
           this.reconnect();
           return;
         }
@@ -226,7 +253,9 @@ export class winetHandler {
 
         const directResult = DirectSchema.safeParse(result_data);
         if (!directResult.success) {
-          this.logger.error('Invalid direct message:', directResult.error);
+          this.logger.error('Invalid direct message:', {
+            data: message,
+          });
           return;
         }
 
@@ -293,11 +322,15 @@ export class winetHandler {
         if (result_code === 100) {
           this.logger.info('Websocket got timed out');
           this.reconnect();
+        } else {
+          this.logger.error('Received notice:', result_code, {
+            data: message,
+          });
         }
         break;
       }
       default:
-        this.logger.error('Received message:', data);
+        this.logger.error('Received unknown message:', data);
     }
   }
 

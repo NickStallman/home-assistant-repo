@@ -9,16 +9,19 @@ import {
   TextSensors,
   ConfigPayload,
 } from './types/HaTypes';
+import Winston from 'winston';
 
 export class MqttPublisher {
+  private logger: Winston.Logger;
   private client: MqttClient;
 
   private connected = false;
 
-  constructor(private url: string) {
+  constructor(logger: Winston.Logger, url: string) {
+    this.logger = logger;
     this.client = mqtt.connect(url);
     this.client.on('connect', () => {
-      console.log('Connected to MQTT broker');
+      this.logger.info('Connected to MQTT broker');
       this.connected = true;
     });
   }

@@ -1,9 +1,9 @@
-name: "WiNet Extractor"
-description: "Extracts data from WiNet devices and sends to Home Assistant over MQTT."
-version: "0.1.0"
-stage: "stable"
-slug: "winet-extractor"
-url: "https://github.com/NickStallman/Winet-Extractor/"
+name: 'WiNet Extractor'
+description: 'Extracts data from WiNet devices and sends to Home Assistant over MQTT.'
+version: '0.1.1'
+stage: 'stable'
+slug: 'winet-extractor'
+url: 'https://github.com/NickStallman/home-assistant-repo/tree/main/winet-extractor'
 arch:
   - armhf
   - armv7
@@ -13,18 +13,22 @@ map:
   - config:rw
 panel_icon: mdi:solar-power
 auth_api: false
-hassio_role: "admin"
-hassio_api: true
-homeassistant_api: true
-startup: "application"
+hassio_role: 'default'
+hassio_api: false
+homeassistant_api: false
+startup: 'application'
 init: false
 services:
   - mqtt:need
 
 options:
-  winet_host: ""
-  mqtt_url: ""
+  winet_host: ''
+  mqtt_url: ''
+  winet_user: ''
+  winet_pass: ''
 
 schema:
-  winet_host: str?
+  winet_host: str
   mqtt_url: str
+  winet_user: str?
+  winet_pass: str?

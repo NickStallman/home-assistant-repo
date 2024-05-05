@@ -3,6 +3,7 @@ import {winetHandler} from './winetHandler';
 import {MqttPublisher} from './homeassistant';
 import Winston from 'winston';
 import fs from 'fs';
+import util from 'util';
 
 const logger = Winston.createLogger({
   level: 'info',
@@ -10,9 +11,13 @@ const logger = Winston.createLogger({
     Winston.format.timestamp({
       format: 'YYYY-MM-DD HH:mm:ss',
     }),
-    Winston.format.printf(
-      info => `${info.timestamp} ${info.level}: ${info.message}`
-    )
+    Winston.format.printf(info => {
+      const {timestamp, level, message, ...extraData} = info;
+      return (
+        `${timestamp} ${level}: ${message} ` +
+        `${Object.keys(extraData).length ? util.format(extraData) : ''}`
+      );
+    })
   ),
   transports: [new Winston.transports.Console()],
 });
@@ -31,8 +36,15 @@ if (!options.mqtt_url) {
 const lang = 'en_us';
 const frequency = 10;
 
-const mqtt = new MqttPublisher(options.mqtt_url);
-const winet = new winetHandler(logger, options.winet_host, lang, frequency);
+const mqtt = new MqttPublisher(logger, options.mqtt_url);
+const winet = new winetHandler(
+  logger,
+  options.winet_host,
+  lang,
+  frequency,
+  options.winet_user || '',
+  options.winet_pass || ''
+);
 
 const configuredSensors: string[] = [];
 const configuredDevices: number[] = [];
@@ -81,7 +93,7 @@ winet.setCallback((devices, deviceStatus) => {
 });
 
 getProperties(options.winet_host).then(properties => {
-  console.log('Fetched l18n properties:');
+  logger.info('Fetched l18n properties.');
 
   winet.setProperties(properties);
   winet.connect();

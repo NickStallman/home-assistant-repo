@@ -4,7 +4,7 @@
 
 Some Sungrow inverters such as the SH10RS do not expose their metrics in a clean way. They do support Modbus but various values are missing making that integration unusable. It's also possible to access the metrics via cloud, however this results in 5 minute delayed data and requires internet access.
 
-This project connects to the WiNet-S2 wifi dongle and communicates with it's Websocket API. This allows access to all metrics updated every 10 seconds.
+This project connects to the Sungrow WiNet-S2 wifi dongle and communicates with it's Websocket API. This allows access to all metrics updated every 10 seconds.
 
 ## Compatibility
 
@@ -35,6 +35,7 @@ You will also have to have your MQTT broker configured and know your credentials
 
 - The Winet Host is simply the IP address or hostname of your Winet-S2 adapter e.g. "192.168.1.100"
 - The MQTT URL is in the format of mqtt://<username>:<password>@<host>
+- (optional) If you have changed the default Winet username and password, you may specify the new password. If these fields are left blank then the default will be used.
 
 4. Start the addon, and observe your detected devices in the addon log or via Integrations -> MQTT
 
