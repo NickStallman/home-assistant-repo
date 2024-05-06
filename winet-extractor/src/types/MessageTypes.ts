@@ -15,6 +15,13 @@ export const ConnectSchema = z.object({
   uid: z.number().int(),
   tips_disable: z.number().int(),
   ip: z.string().ip(),
+  forceModifyPasswd: z.number().int().optional(),
+});
+
+export const LoginSchema = z.object({
+  service: z.string(),
+  token: z.string().uuid(),
+  uid: z.number().int(),
 });
 
 export const DeviceSchema = z.object({

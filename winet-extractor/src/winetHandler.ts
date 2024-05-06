@@ -7,6 +7,7 @@ import {
   DeviceListSchema,
   RealtimeSchema,
   DirectSchema,
+  LoginSchema,
 } from './types/MessageTypes';
 import slugify from 'slugify';
 import {Properties} from './types/Properties';
@@ -38,6 +39,9 @@ export class winetHandler {
   private deviceStatus: DeviceStatusMap[] = [];
   private lastDeviceUpdate: Record<string, Date> = {};
   private watchdogCount = 0;
+  private winetVersion: number | undefined = undefined;
+
+  private scanInterval: NodeJS.Timeout | undefined = undefined;
 
   constructor(
     logger: Winston.Logger,
@@ -82,6 +86,11 @@ export class winetHandler {
     this.inFlightDevice = undefined;
     this.currentStages = [];
     this.watchdogCount = 0;
+    this.winetVersion = undefined;
+
+    if (this.scanInterval !== undefined) {
+      clearInterval(this.scanInterval);
+    }
 
     this.ws = new Websocket(`ws://${this.host}:8082/ws/home/overview`);
 
@@ -98,9 +107,12 @@ export class winetHandler {
   }
 
   private sendPacket(data: Record<string, string | number>): void {
-    data.lang = this.lang;
-    data.token = this.token;
-    this.ws.send(JSON.stringify(data));
+    const packet = {
+      lang: this.lang,
+      token: this.token,
+      ...data,
+    };
+    this.ws.send(JSON.stringify(packet));
   }
 
   private onOpen() {
@@ -108,7 +120,7 @@ export class winetHandler {
       service: 'connect',
     });
 
-    setInterval(() => {
+    this.scanInterval = setInterval(() => {
       if (this.currentDevice === undefined) {
         this.scanDevices();
       }
@@ -117,7 +129,6 @@ export class winetHandler {
 
   private onMessage(data: Websocket.Data) {
     const message = JSON.parse(data.toString());
-
     const validationResult = MessageSchema.safeParse(message);
 
     if (!validationResult.success) {
@@ -148,29 +159,54 @@ export class winetHandler {
           this.logger.error('Token is missing');
           return;
         }
+
+        if (connectData.forceModifyPasswd !== undefined) {
+          this.logger.info('Running a newer firmware version');
+          this.winetVersion = 2;
+        } else {
+          this.logger.info('Running an older firmware version');
+          this.winetVersion = 1;
+        }
+
         this.token = connectData.token;
 
         this.logger.info('Connected to Winet, logging in');
+
+        this.sendPacket({
+          service: 'login',
+          passwd: this.winetPass,
+          username: this.winetUser,
+        });
+        break;
+      }
+      case 'login': {
+        const loginResult = LoginSchema.safeParse(result_data);
+        if (!loginResult.success) {
+          this.logger.error('Invalid login message:', {
+            data: message,
+          });
+          return;
+        }
+        const loginData = loginResult.data;
+
+        if (loginData.token === undefined) {
+          this.logger.error('Authenticated Token is missing');
+          return;
+        }
+
+        if (result_code === 1) {
+          this.logger.info('Authenticated successfully');
+        } else {
+          throw new Error('Failed to authenticate');
+        }
+
+        this.token = loginData.token;
 
         this.sendPacket({
           service: 'devicelist',
           type: '0',
           is_check_token: '0',
         });
-
-        this.sendPacket({
-          service: 'login',
-          username: this.winetUser,
-          passwd: this.winetPass,
-        });
-        break;
-      }
-      case 'login': {
-        if (result_code === 1) {
-          this.logger.info('Authenticated successfully');
-        } else {
-          throw new Error('Failed to authenticate');
-        }
         break;
       }
       case 'devicelist': {
@@ -182,7 +218,6 @@ export class winetHandler {
           return;
         }
         const deviceListData = deviceListResult.data;
-
         for (const device of deviceListData.list) {
           if (DeviceTypeStages[device.dev_type].length === 0) {
             this.logger.info(
