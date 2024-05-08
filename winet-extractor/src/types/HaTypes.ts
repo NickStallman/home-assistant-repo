@@ -24,24 +24,6 @@ export const DeviceClasses: Record<string, string | undefined> = {
   kΩ: undefined,
 };
 
-export const TotalEnergySensors: string[] = [
-  'total_battery_discharge_bms',
-  'total_battery_charging_energy',
-  'daily_battery_charging_energy',
-  'daily_battery_charging_energy_from_pv',
-  'daily_battery_discharging_energy',
-  'daily_feed_in_energy',
-  'daily_feed_in_energy_pv',
-  'total_battery_charging_energy',
-  'total_battery_charging_energy_from_pv',
-  'total_battery_discharging_energy',
-  'total_feed_in_energy',
-  'total_feed_in_energy_pv',
-  'total_load_energy_consumption_from_pv',
-  'total_purchased_energy',
-  'total_pv_yield',
-];
-
 export const TextSensors: string[] = [
   'battery_operation_status',
   'running_status',

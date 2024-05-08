@@ -2,6 +2,7 @@ import {z} from 'zod';
 
 export const MessageSchema = z.object({
   result_code: z.number(),
+  result_msg: z.string().optional(),
   result_data: z
     .object({
       service: z.string(),

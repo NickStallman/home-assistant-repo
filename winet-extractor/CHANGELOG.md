@@ -1,3 +1,11 @@
+### 0.1.3
+
+- Handle "Internal Error" from the Winet correctly, which was causing it to hang previously.
+- Set state_class to "total_increasing" for all kWh values
+- Tweaked MQTT so the entitity configuration would be retained by MQTT, which helps with Home Assistant restarts.
+- Improved MQTT error handling
+- Improved documentation
+
 ### 0.1.2
 
 - Newer Winet firmware enforces authentication, and this involves using a updated token after authentication is done.

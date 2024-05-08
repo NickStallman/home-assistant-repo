@@ -140,6 +140,12 @@ export class winetHandler {
 
     const typedMessage = validationResult.data;
 
+    if (typedMessage.result_msg === 'I18N_COMMON_INTER_ABNORMAL') {
+      this.logger.error('Winet disconnect: Internal Error');
+      this.reconnect();
+      return;
+    }
+
     const result_code = typedMessage.result_code;
     const result_data = typedMessage.result_data;
     const service = result_data.service;

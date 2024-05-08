@@ -1,4 +1,4 @@
-# Sungrow WiNet S2 Extration Tool
+# Sungrow WiNet S2 Extraction Tool
 
 ## What is this tool
 
@@ -30,14 +30,38 @@ You will also have to have your MQTT broker configured and know your credentials
 
 [![Open your Home Assistant instance and show the add add-on repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FNickStallman%2Fhome-assistant-repo)
 
-2. Install the WiNet Extractor addon
+2. Install the WiNet Extraction addon
 3. Configure your Winet Host, and MQTT URL.
 
 - The Winet Host is simply the IP address or hostname of your Winet-S2 adapter e.g. "192.168.1.100"
-- The MQTT URL is in the format of mqtt://<username>:<password>@<host>
+- The MQTT URL is in the format of `mqtt://<username>:<password>@<host>`
 - (optional) If you have changed the default Winet username and password, you may specify the new password. If these fields are left blank then the default will be used.
 
 4. Start the addon, and observe your detected devices in the addon log or via Integrations -> MQTT
+
+### Useful Entities
+
+These entities may be slightly different depending on your inverter, as the names of entities are pulled from the inverter.
+
+#### Energy Dashbard
+
+These are cumulative energy values measured in kwh, which are useful for Home Assistant's Energy Dashboard
+
+- Grid Consumption: daily_purchased_energy
+- Return to grid: daily_feed_in_energy or daily_feed_in_energy_pv
+- Battery Charging: daily_battery_charging_energy
+- Battery Discharging: daily_battery_discharging_energy
+
+#### Realtime/Instantaneous Values
+
+These are live values measured in kw.
+
+- Total Solar Generation: mppt_total_power
+- Individual MPPT Solar Generation: mppt1_power / mppt2_power / mppt3_power / mppt4_power
+- Battery Charge: battery_charging_power
+- Battery Discharge: battery_discharging_power
+- Grid Consumption: purchased_power
+- Return to grid: total_export_active_power
 
 ### Optional additional sensors
 

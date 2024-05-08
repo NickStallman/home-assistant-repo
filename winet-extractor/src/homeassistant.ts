@@ -5,7 +5,6 @@ import {DeviceStatus} from './types/DeviceStatus';
 import {
   StateClasses,
   DeviceClasses,
-  TotalEnergySensors,
   TextSensors,
   ConfigPayload,
 } from './types/HaTypes';
@@ -23,6 +22,10 @@ export class MqttPublisher {
     this.client.on('connect', () => {
       this.logger.info('Connected to MQTT broker');
       this.connected = true;
+    });
+
+    this.client.on('error', err => {
+      this.logger.error(`MQTT error: ${err}`);
     });
   }
 
@@ -64,7 +67,7 @@ export class MqttPublisher {
       });
     }
 
-    this.client.publish(topic, payload, {}, err => {
+    this.client.publish(topic, payload, {retain: false}, err => {
       if (err) {
         throw new Error(`Failed to publish sensor data: ${err}`);
       }
@@ -94,11 +97,16 @@ export class MqttPublisher {
       },
     });
 
-    this.client.publish(configTopic, configPayload, {}, err => {
-      if (err) {
-        throw new Error(`Failed to publish register device: ${err}`);
+    this.client.publish(
+      configTopic,
+      configPayload,
+      {retain: true, qos: 1},
+      err => {
+        if (err) {
+          throw new Error(`Failed to publish register device: ${err}`);
+        }
       }
-    });
+    );
 
     return true;
   }
@@ -124,7 +132,7 @@ export class MqttPublisher {
       : '{{ value_json.value }}';
     const identifier = `${device.dev_model}_${device.dev_sn}`;
     const configPayload: ConfigPayload = {
-      name: deviceStatus.name,
+      name: deviceStatus.name.trim(),
       state_topic: `homeassistant/sensor/${deviceSlug}/${slug}/state`,
       unique_id: `${deviceSlug}_${slug}`.toLowerCase(),
       value_template: valueTemplate,
@@ -143,25 +151,28 @@ export class MqttPublisher {
     }
 
     configPayload.device_class = '';
-    if (deviceStatus.unit === 'kWp') {
-      configPayload.unit_of_measurement = 'kW';
+    switch (deviceStatus.unit) {
+      case 'kWp':
+        configPayload.unit_of_measurement = 'kW';
+        break;
+      case '℃':
+        configPayload.unit_of_measurement = '°C';
+        break;
+      case 'kvar':
+        configPayload.unit_of_measurement = 'var';
+        break;
+      case 'kVA':
+        configPayload.unit_of_measurement = 'VA';
+        break;
     }
-    if (deviceStatus.unit === '℃') {
-      configPayload.unit_of_measurement = '°C';
-    }
-    if (deviceStatus.unit === 'kvar') {
-      configPayload.unit_of_measurement = 'var';
-    }
-    if (deviceStatus.unit === 'kVA') {
-      configPayload.unit_of_measurement = 'VA';
-    }
+
     if (StateClasses[deviceStatus.unit]) {
       configPayload.state_class = StateClasses[deviceStatus.unit];
     }
     if (DeviceClasses[deviceStatus.unit]) {
       configPayload.device_class = DeviceClasses[deviceStatus.unit] ?? '';
     }
-    if (TotalEnergySensors.includes(slug)) {
+    if (configPayload.unit_of_measurement === 'kWh') {
       configPayload.state_class = 'total_increasing';
     }
     if (slug === 'total_power_factor') {
@@ -174,11 +185,16 @@ export class MqttPublisher {
       delete configPayload.state_class;
     }
 
-    this.client.publish(configTopic, JSON.stringify(configPayload), {}, err => {
-      if (err) {
-        throw new Error(`Failed to publish sensor config: ${err}`);
+    this.client.publish(
+      configTopic,
+      JSON.stringify(configPayload),
+      {retain: true, qos: 1},
+      err => {
+        if (err) {
+          throw new Error(`Failed to publish sensor config: ${err}`);
+        }
       }
-    });
+    );
 
     return true;
   }
