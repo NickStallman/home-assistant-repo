@@ -1,3 +1,8 @@
+### 0.1.4
+
+- Improved detection of hanging
+- Added poll interval parameter, defaulting to 10 seconds which should work well in most cases
+
 ### 0.1.3
 
 - Handle "Internal Error" from the Winet correctly, which was causing it to hang previously.

@@ -34,7 +34,7 @@ if (!options.mqtt_url) {
 }
 
 const lang = 'en_us';
-const frequency = 10;
+const frequency = parseInt(options.frequency) || 10;
 
 const mqtt = new MqttPublisher(logger, options.mqtt_url);
 const winet = new winetHandler(

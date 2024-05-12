@@ -39,9 +39,11 @@ export class winetHandler {
   private deviceStatus: DeviceStatusMap[] = [];
   private lastDeviceUpdate: Record<string, Date> = {};
   private watchdogCount = 0;
+  private watchdogLastData: number | undefined = undefined;
   private winetVersion: number | undefined = undefined;
 
   private scanInterval: NodeJS.Timeout | undefined = undefined;
+  private watchdogInterval: NodeJS.Timeout | undefined = undefined;
 
   constructor(
     logger: Winston.Logger,
@@ -91,6 +93,10 @@ export class winetHandler {
     if (this.scanInterval !== undefined) {
       clearInterval(this.scanInterval);
     }
+    if (this.watchdogInterval !== undefined) {
+      clearInterval(this.watchdogInterval);
+    }
+    this.watchdogLastData = Date.now();
 
     this.ws = new Websocket(`ws://${this.host}:8082/ws/home/overview`);
 
@@ -101,9 +107,17 @@ export class winetHandler {
   public reconnect(): void {
     this.ws.close();
     this.logger.warn('Reconnecting to Winet');
+
+    if (this.scanInterval !== undefined) {
+      clearInterval(this.scanInterval);
+    }
+    if (this.watchdogInterval !== undefined) {
+      clearInterval(this.watchdogInterval);
+    }
+
     setTimeout(() => {
       this.connect();
-    }, 5000);
+    }, this.frequency * 1000 * 3);
   }
 
   private sendPacket(data: Record<string, string | number>): void {
@@ -123,6 +137,18 @@ export class winetHandler {
     this.scanInterval = setInterval(() => {
       if (this.currentDevice === undefined) {
         this.scanDevices();
+      }
+    }, this.frequency * 1000);
+
+    this.watchdogInterval = setInterval(() => {
+      if (this.watchdogLastData === undefined) {
+        return;
+      }
+
+      const diff = Date.now() - this.watchdogLastData;
+      if (diff > this.frequency * 1000 * 6) {
+        this.logger.error('Watchdog triggered, reconnecting');
+        this.reconnect();
       }
     }, this.frequency * 1000);
   }
@@ -145,6 +171,8 @@ export class winetHandler {
       this.reconnect();
       return;
     }
+
+    this.watchdogLastData = Date.now();
 
     const result_code = typedMessage.result_code;
     const result_data = typedMessage.result_data;
@@ -364,7 +392,7 @@ export class winetHandler {
           this.logger.info('Websocket got timed out');
           this.reconnect();
         } else {
-          this.logger.error('Received notice:', result_code, {
+          this.logger.error('Received notice', {
             data: message,
           });
         }

@@ -12,7 +12,7 @@ LABEL \
 WORKDIR /usr/src/app
 
 # Install Node.js
-RUN apk add --no-cache nodejs npm
+RUN apk add --no-cache nodejs npm tzdata
 
 # Bundle app source
 COPY . /usr/src/app
