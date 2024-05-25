@@ -14,8 +14,8 @@ export const ConnectSchema = z.object({
   service: z.literal('connect'),
   token: z.string().uuid(),
   uid: z.number().int(),
-  tips_disable: z.number().int(),
-  ip: z.string().ip(),
+  tips_disable: z.number().int().optional(),
+  ip: z.string().ip().optional(),
   forceModifyPasswd: z.number().int().optional(),
 });
 

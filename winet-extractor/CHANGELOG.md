@@ -1,3 +1,7 @@
+### 0.1.5
+
+- Possibly add support for older Winet dongles
+
 ### 0.1.4
 
 - Improved detection of hanging
