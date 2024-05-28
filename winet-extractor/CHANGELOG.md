@@ -1,3 +1,8 @@
+### 0.1.6
+
+- Further support for old Winet-S devices (separate from Winet-S2)
+- Reduced the minimum poll frequency
+
 ### 0.1.5
 
 - Possibly add support for older Winet dongles

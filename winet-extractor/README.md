@@ -6,6 +6,8 @@ Some Sungrow inverters such as the SH10RS do not expose their metrics in a clean
 
 This project connects to the Sungrow WiNet-S2 wifi dongle and communicates with it's Websocket API. This allows access to all metrics updated every 10 seconds.
 
+This project may also be usable with the older Winet-S dongle and a range of other inverters and devices.
+
 ## Compatibility
 
 This list is the confirmed working with the following hardware.
@@ -94,10 +96,6 @@ sensor:
     method: left
     round: 4
 ```
-
-## Todo
-
-- Add support for writing to registers to control the inverter.
 
 ## Related Projects
 

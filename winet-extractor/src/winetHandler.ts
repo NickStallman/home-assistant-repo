@@ -115,9 +115,12 @@ export class winetHandler {
       clearInterval(this.watchdogInterval);
     }
 
-    setTimeout(() => {
-      this.connect();
-    }, this.frequency * 1000 * 3);
+    setTimeout(
+      () => {
+        this.connect();
+      },
+      this.frequency * 1000 * 3
+    );
   }
 
   private sendPacket(data: Record<string, string | number>): void {
@@ -194,12 +197,19 @@ export class winetHandler {
           return;
         }
 
-        if (connectData.forceModifyPasswd !== undefined) {
-          this.logger.info('Running a newer firmware version');
-          this.winetVersion = 2;
-        } else {
-          this.logger.info('Running an older firmware version');
+        if (connectData.ip === undefined) {
+          this.logger.info('Connected to a older Winet-S device');
           this.winetVersion = 1;
+        } else if (connectData.forceModifyPasswd !== undefined) {
+          this.logger.info(
+            'Connected to a Winet-S2 device with newer firmware'
+          );
+          this.winetVersion = 3;
+        } else {
+          this.logger.info(
+            'Connected to a Winet-S2 device with older firmware'
+          );
+          this.winetVersion = 2;
         }
 
         this.token = connectData.token;
