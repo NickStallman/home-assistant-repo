@@ -1,3 +1,7 @@
+### 0.1.7
+
+- Filter the inverter name for inverters like SH8.0RT. Full stops are not valid in MQTT for autodiscovery
+
 ### 0.1.6
 
 - Further support for old Winet-S devices (separate from Winet-S2)

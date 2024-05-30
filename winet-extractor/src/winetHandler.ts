@@ -275,6 +275,8 @@ export class winetHandler {
           // If devices are not already in the list, add them
           if (this.devices.findIndex(d => d.dev_sn === device.dev_sn) === -1) {
             this.deviceStatus[device.dev_id] = {};
+            device.dev_model = device.dev_model.replace(/[^a-zA-Z0-9]/g, '');
+            device.dev_sn = device.dev_sn.replace(/[^a-zA-Z0-9]/g, '');
             this.logger.info(
               `Detected device: ${device.dev_model} (${device.dev_sn})`
             );
