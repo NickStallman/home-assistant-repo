@@ -14,6 +14,7 @@ import {Properties} from './types/Properties';
 import {DeviceStatus, DeviceStatusMap} from './types/DeviceStatus';
 import {DeviceTypeStages, NumericUnits, QueryStages} from './types/Constants';
 import Winston from 'winston';
+import {Analytics} from './analytics';
 
 export class winetHandler {
   private logger: Winston.Logger;
@@ -26,6 +27,7 @@ export class winetHandler {
     deviceStatus: DeviceStatusMap[]
   ) => void;
   private ws!: Websocket;
+  private analytics: Analytics;
 
   private winetUser = '';
   private winetPass = '';
@@ -51,7 +53,8 @@ export class winetHandler {
     lang: string,
     frequency: number,
     winetUser: string,
-    winetPass: string
+    winetPass: string,
+    analytics: Analytics
   ) {
     this.logger = logger;
     this.host = host;
@@ -67,6 +70,7 @@ export class winetHandler {
     } else {
       this.winetPass = 'pw8888';
     }
+    this.analytics = analytics;
   }
 
   public setProperties(properties: Properties): void {
@@ -102,6 +106,7 @@ export class winetHandler {
 
     this.ws.on('open', this.onOpen.bind(this));
     this.ws.on('message', this.onMessage.bind(this));
+    this.ws.on('error', this.onError.bind(this));
   }
 
   public reconnect(): void {
@@ -156,11 +161,21 @@ export class winetHandler {
     }, this.frequency * 1000);
   }
 
+  private onError(error: Websocket.ErrorEvent) {
+    this.logger.error('Websocket error:', error.message);
+    this.analytics.registerError('websocket_onError', error.message);
+
+    if (this.watchdogInterval === undefined) {
+      this.reconnect();
+    }
+  }
+
   private onMessage(data: Websocket.Data) {
     const message = JSON.parse(data.toString());
     const validationResult = MessageSchema.safeParse(message);
 
     if (!validationResult.success) {
+      this.analytics.registerError('invalid_message', 'MessageSchema');
       this.logger.error('Invalid message:', {
         data: message,
       });
@@ -171,6 +186,7 @@ export class winetHandler {
 
     if (typedMessage.result_msg === 'I18N_COMMON_INTER_ABNORMAL') {
       this.logger.error('Winet disconnect: Internal Error');
+      this.analytics.registerError('winetError', 'INTER_ABNORMAL');
       this.reconnect();
       return;
     }
@@ -185,6 +201,7 @@ export class winetHandler {
       case 'connect': {
         const connectResult = ConnectSchema.safeParse(result_data);
         if (!connectResult.success) {
+          this.analytics.registerError('connectSchema', 'successFalse');
           this.logger.error('Invalid connect message:', {
             data: message,
           });
@@ -193,6 +210,7 @@ export class winetHandler {
         const connectData = connectResult.data;
 
         if (connectData.token === undefined) {
+          this.analytics.registerError('connectSchema', 'tokenMissing');
           this.logger.error('Token is missing');
           return;
         }
@@ -211,6 +229,7 @@ export class winetHandler {
           );
           this.winetVersion = 2;
         }
+        this.analytics.registerVersion(this.winetVersion);
 
         this.token = connectData.token;
 
@@ -226,6 +245,7 @@ export class winetHandler {
       case 'login': {
         const loginResult = LoginSchema.safeParse(result_data);
         if (!loginResult.success) {
+          this.analytics.registerError('loginSchema', 'successFalse');
           this.logger.error('Invalid login message:', {
             data: message,
           });
@@ -234,6 +254,7 @@ export class winetHandler {
         const loginData = loginResult.data;
 
         if (loginData.token === undefined) {
+          this.analytics.registerError('loginSchema', 'tokenMissing');
           this.logger.error('Authenticated Token is missing');
           return;
         }
@@ -241,6 +262,7 @@ export class winetHandler {
         if (result_code === 1) {
           this.logger.info('Authenticated successfully');
         } else {
+          this.analytics.registerError('loginSchema', 'resultCodeFail');
           throw new Error('Failed to authenticate');
         }
 
@@ -256,6 +278,7 @@ export class winetHandler {
       case 'devicelist': {
         const deviceListResult = DeviceListSchema.safeParse(result_data);
         if (!deviceListResult.success) {
+          this.analytics.registerError('deviceListSchema', 'successFalse');
           this.logger.error('Invalid devicelist message:', {
             data: message,
           });
@@ -284,6 +307,8 @@ export class winetHandler {
           }
         }
 
+        this.analytics.registerDevices(this.devices);
+
         this.scanDevices();
         break;
       }
@@ -294,6 +319,7 @@ export class winetHandler {
 
         const realtimeResult = RealtimeSchema.safeParse(result_data);
         if (!realtimeResult.success) {
+          this.analytics.registerError('realtimeSchema', 'successFalse');
           this.logger.error('Invalid realtime message:', {
             data: message,
           });
@@ -334,6 +360,7 @@ export class winetHandler {
 
         const directResult = DirectSchema.safeParse(result_data);
         if (!directResult.success) {
+          this.analytics.registerError('directSchema', 'successFalse');
           this.logger.error('Invalid direct message:', {
             data: message,
           });
@@ -400,6 +427,7 @@ export class winetHandler {
         break;
       }
       case 'notice': {
+        this.analytics.registerError('notice', result_code + '');
         if (result_code === 100) {
           this.logger.info('Websocket got timed out');
           this.reconnect();
@@ -411,6 +439,7 @@ export class winetHandler {
         break;
       }
       default:
+        this.analytics.registerError('unknownService', service);
         this.logger.error('Received unknown message:', data);
     }
   }
@@ -432,11 +461,13 @@ export class winetHandler {
 
   private scanDevices() {
     if (this.inFlightDevice !== undefined) {
+      this.analytics.registerError('scanDevices', 'inFlightDevice');
       this.logger.info(
         `Skipping scanDevices, in flight device: ${this.inFlightDevice}`
       );
       this.watchdogCount++;
       if (this.watchdogCount > 5) {
+        this.analytics.registerError('scanDevices', 'watchdogTriggered');
         this.logger.error('Watchdog triggered, reconnecting');
         this.reconnect();
       }

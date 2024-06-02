@@ -4,6 +4,7 @@ import {MqttPublisher} from './homeassistant';
 import Winston from 'winston';
 import fs from 'fs';
 import util from 'util';
+import {Analytics} from './analytics';
 
 const logger = Winston.createLogger({
   level: 'info',
@@ -43,7 +44,8 @@ const winet = new winetHandler(
   lang,
   frequency,
   options.winet_user || '',
-  options.winet_pass || ''
+  options.winet_pass || '',
+  new Analytics(options.analytics || true)
 );
 
 const configuredSensors: string[] = [];

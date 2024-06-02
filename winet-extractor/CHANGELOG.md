@@ -1,3 +1,8 @@
+### 0.1.8
+
+- Handle an error where the websocket connection fails to reconnect
+- Add anonymous analytics to help survey device compatibility and errors
+
 ### 0.1.7
 
 - Filter the inverter name for inverters like SH8.0RT. Full stops are not valid in MQTT for autodiscovery

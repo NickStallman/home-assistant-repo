@@ -103,6 +103,10 @@ sensor:
 - [SunGather](https://github.com/bohdan-s/SunGather)
 - [Sungrow SHx Inverter Modbus Home Assistant](https://github.com/mkaiser/Sungrow-SHx-Inverter-Modbus-Home-Assistant)
 
+## Analytics
+
+Some anonymous analytics are collected to survey the use of this addon to see what Sungrow hardware it is working with and if any errors arise (e.g. for newer firmware versions). These analytics can be disabled on the Configuration tab of the addon.
+
 ## Feedback
 
 Feedback is appreciated so please drop me a line or file an issue.
