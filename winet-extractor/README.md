@@ -1,10 +1,12 @@
-# Sungrow WiNet S2 Extraction Tool
+# Sungrow WiNet S/WiNet S2 Extraction Tool
 
 ## What is this tool
 
 Some Sungrow inverters such as the SH10RS do not expose their metrics in a clean way. They do support Modbus but various values are missing making that integration unusable. It's also possible to access the metrics via cloud, however this results in 5 minute delayed data and requires internet access.
 
-This project connects to the Sungrow WiNet-S2 wifi dongle and communicates with it's Websocket API. This allows access to all metrics updated every 10 seconds.
+This project connects to the Sungrow WiNet S2 wifi dongle and communicates with it's Websocket API. This allows access to all available metrics visible from the WiNet interface and updates every 10 seconds (configurable).
+
+It can also work for the older WiNet S dongles and has broad inverter support with minimal configuration.
 
 This project may also be usable with the older Winet-S dongle and a range of other inverters and devices.
 
@@ -14,13 +16,16 @@ This list is the confirmed working with the following hardware.
 
 ### Inverters
 
-- Sungrow SH10RS - 10kw Single Phase with 4 MPPT
+- Sungrow SH50RS/SH80RS/SH10RS - Single Phase Hybrid Inverters
+- Sungrow SH10RT/SH15T - Three Phase Hybrid Inverters
+- Sungrow SG80RS/SG10RS - Single Phase String Inverters
+- Sungrow SG80RT/SG10RT - Three Phase String Inverters
 
 ### Batteries
 
 - SBR064/SBR096/SBR128/SBR160/SBR192/SBR224/SBR256
 
-Other devices connected to a Sungrow Winet S2 adapter may also work but have not been confirmed.
+Other devices connected to a Sungrow Winet S or S2 adapter may also work but have not been confirmed.
 
 ## Configuration
 
