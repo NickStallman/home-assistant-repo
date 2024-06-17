@@ -1,0 +1,9 @@
+services:
+  winet-extractor:
+    restart: unless-stopped
+    build:
+      context: .
+      args:
+        BUILD_FROM: ${BUILD_FROM}
+    volumes:
+      - ./.env:/usr/src/app/.env:ro

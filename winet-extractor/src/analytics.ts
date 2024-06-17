@@ -8,6 +8,8 @@ export class Analytics {
   private enabled: boolean;
   private posthog;
   private winetVersion = 0;
+  private devices: z.infer<typeof DeviceSchema>[] = [];
+  private devicePingInterval: NodeJS.Timeout | undefined = undefined;
 
   constructor(enabled: boolean) {
     this.enabled = enabled;
@@ -23,8 +25,21 @@ export class Analytics {
   }
 
   public registerDevices(devices: z.infer<typeof DeviceSchema>[]) {
+    this.devices = devices;
+    this.pingDevices();
+
+    if (this.devicePingInterval) {
+      clearInterval(this.devicePingInterval);
+    }
+    this.devicePingInterval = setInterval(
+      this.pingDevices.bind(this),
+      3600 * 1000 * 6
+    );
+  }
+
+  private pingDevices() {
     let deviceString = '';
-    for (const device of devices) {
+    for (const device of this.devices) {
       deviceString += device.dev_model + ':' + device.dev_sn + ';';
     }
 
@@ -37,7 +52,7 @@ export class Analytics {
     if (this.enabled && this.id.length > 0) {
       this.ping();
 
-      for (const device of devices) {
+      for (const device of this.devices) {
         this.posthog.capture({
           distinctId: this.id,
           event: 'device_registered',

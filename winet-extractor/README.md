@@ -97,6 +97,16 @@ sensor:
     round: 4
 ```
 
+## Standalone mode
+
+This addon can be run as a normal docker container, rather than as a Home Assistant Addon.
+
+First clone the repository and copy `.env.example` to `.env` then fill in the configuration parameters.
+
+Then run `./docker-compose-up.sh`. This is equivelant to `docker compose up` except it detects the correct architecture to build the image from.
+
+Once everything is running smoothly you can run it in detatched mode with `./docker-compose-up.sh -d`
+
 ## Related Projects
 
 - [GoSungrow](https://github.com/MickMake/GoSungrow)
@@ -106,6 +116,8 @@ sensor:
 ## Analytics
 
 Some anonymous analytics are collected to survey the use of this addon to see what Sungrow hardware it is working with and if any errors arise (e.g. for newer firmware versions). These analytics can be disabled on the Configuration tab of the addon.
+
+No personal information is collected, only various error states and Sungrow model names.
 
 ## Feedback
 

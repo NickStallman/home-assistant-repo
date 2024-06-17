@@ -5,6 +5,7 @@ import Winston from 'winston';
 import fs from 'fs';
 import util from 'util';
 import {Analytics} from './analytics';
+const dotenv = require('dotenv');
 
 const logger = Winston.createLogger({
   level: 'info',
@@ -23,10 +24,32 @@ const logger = Winston.createLogger({
   transports: [new Winston.transports.Console()],
 });
 
-const rawOptions = fs.readFileSync('/data/options.json', 'utf8');
-const options = JSON.parse(rawOptions);
+let options = {
+  winet_host: '',
+  mqtt_url: '',
+  winet_user: '',
+  winet_pass: '',
+  poll_interval: '10',
+  analytics: true,
+};
+
+// Check if the file exists
+if (fs.existsSync('/data/options.json')) {
+  const rawOptions = fs.readFileSync('/data/options.json', 'utf8');
+  options = JSON.parse(rawOptions);
+} else {
+  dotenv.config();
+
+  options.winet_host = process.env.WINET_HOST || '';
+  options.mqtt_url = process.env.MQTT_URL || '';
+  options.winet_user = process.env.WINET_USER || '';
+  options.winet_pass = process.env.WINET_PASS || '';
+  options.poll_interval = process.env.POLL_INTERVAL || '10';
+  options.analytics = process.env.ANALYTICS === 'true';
+}
 
 if (!options.winet_host) {
+  console.log(process.env);
   throw new Error('No host provided');
 }
 
