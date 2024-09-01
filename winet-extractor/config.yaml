@@ -32,6 +32,8 @@ options:
 schema:
   winet_host: str
   mqtt_url: str
+  mqtt_user: str?
+  mqtt_password: password?
   winet_user: str?
   winet_pass: str?
   poll_interval: int(1,3600)

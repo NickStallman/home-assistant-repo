@@ -16,9 +16,12 @@ export class MqttPublisher {
 
   private connected = false;
 
-  constructor(logger: Winston.Logger, url: string) {
+  constructor(logger: Winston.Logger, url: string, username?: string, password?: string) {
     this.logger = logger;
-    this.client = mqtt.connect(url);
+    this.client = mqtt.connect(url, {
+      username: username,
+      password: password
+    });
     this.client.on('connect', () => {
       this.logger.info('Connected to MQTT broker');
       this.connected = true;
