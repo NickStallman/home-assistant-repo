@@ -24,6 +24,8 @@ services:
 options:
   winet_host: ''
   mqtt_url: ''
+  mqtt_password: ''
+  mqtt_username: ''
   winet_user: ''
   winet_pass: ''
   poll_interval: 10
@@ -32,6 +34,8 @@ options:
 schema:
   winet_host: str
   mqtt_url: str
+  mqtt_password: str?
+  mqtt_username: str?
   winet_user: str?
   winet_pass: str?
   poll_interval: int(1,3600)
