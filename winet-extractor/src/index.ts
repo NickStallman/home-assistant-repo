@@ -1,10 +1,10 @@
-import {getProperties} from './getProperties';
-import {winetHandler} from './winetHandler';
-import {MqttPublisher} from './homeassistant';
+import { getProperties } from './getProperties';
+import { winetHandler } from './winetHandler';
+import { MqttPublisher } from './homeassistant';
 import Winston from 'winston';
 import fs from 'fs';
 import util from 'util';
-import {Analytics} from './analytics';
+import { Analytics } from './analytics';
 const dotenv = require('dotenv');
 
 const logger = Winston.createLogger({
@@ -14,7 +14,7 @@ const logger = Winston.createLogger({
       format: 'YYYY-MM-DD HH:mm:ss',
     }),
     Winston.format.printf(info => {
-      const {timestamp, level, message, ...extraData} = info;
+      const { timestamp, level, message, ...extraData } = info;
       return (
         `${timestamp} ${level}: ${message} ` +
         `${Object.keys(extraData).length ? util.format(extraData) : ''}`
@@ -27,6 +27,8 @@ const logger = Winston.createLogger({
 let options = {
   winet_host: '',
   mqtt_url: '',
+  mqtt_password: '',
+  mqtt_username: '',
   winet_user: '',
   winet_pass: '',
   poll_interval: '10',
@@ -42,6 +44,8 @@ if (fs.existsSync('/data/options.json')) {
 
   options.winet_host = process.env.WINET_HOST || '';
   options.mqtt_url = process.env.MQTT_URL || '';
+  options.mqtt_password = process.env.MQTT_PASSWORD || '';
+  options.mqtt_username = process.env.MQTT_USERNAME || '';
   options.winet_user = process.env.WINET_USER || '';
   options.winet_pass = process.env.WINET_PASS || '';
   options.poll_interval = process.env.POLL_INTERVAL || '10';
@@ -59,8 +63,8 @@ if (!options.mqtt_url) {
 
 const lang = 'en_us';
 const frequency = parseInt(options.poll_interval) || 10;
-
-const mqtt = new MqttPublisher(logger, options.mqtt_url);
+const auth = { pw: options.mqtt_password, uname: options.mqtt_username }
+const mqtt = new MqttPublisher(logger, options.mqtt_url, auth.pw !== '' ? auth : undefined);
 const winet = new winetHandler(
   logger,
   options.winet_host,

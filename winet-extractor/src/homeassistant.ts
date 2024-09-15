@@ -1,7 +1,7 @@
-import mqtt, {MqttClient} from 'mqtt';
-import {z} from 'zod';
-import {DeviceSchema} from './types/MessageTypes';
-import {DeviceStatus} from './types/DeviceStatus';
+import mqtt, { MqttClient } from 'mqtt';
+import { z } from 'zod';
+import { DeviceSchema } from './types/MessageTypes';
+import { DeviceStatus } from './types/DeviceStatus';
 import {
   StateClasses,
   DeviceClasses,
@@ -16,9 +16,16 @@ export class MqttPublisher {
 
   private connected = false;
 
-  constructor(logger: Winston.Logger, url: string) {
+  constructor(logger: Winston.Logger, url: string, auth?: {pw: string, uname: string }) {
     this.logger = logger;
-    this.client = mqtt.connect(url);
+    if (auth != undefined) {
+      this.client = mqtt.connect(url, {
+        password: auth.pw,
+        username: auth.uname,
+      })
+    }else{
+      this.client = mqtt.connect(url);
+    }
     this.client.on('connect', () => {
       this.logger.info('Connected to MQTT broker');
       this.connected = true;
@@ -67,7 +74,7 @@ export class MqttPublisher {
       });
     }
 
-    this.client.publish(topic, payload, {retain: false}, err => {
+    this.client.publish(topic, payload, { retain: false }, err => {
       if (err) {
         throw new Error(`Failed to publish sensor data: ${err}`);
       }
@@ -100,7 +107,7 @@ export class MqttPublisher {
     this.client.publish(
       configTopic,
       configPayload,
-      {retain: true, qos: 1},
+      { retain: true, qos: 1 },
       err => {
         if (err) {
           throw new Error(`Failed to publish register device: ${err}`);
@@ -188,7 +195,7 @@ export class MqttPublisher {
     this.client.publish(
       configTopic,
       JSON.stringify(configPayload),
-      {retain: true, qos: 1},
+      { retain: true, qos: 1 },
       err => {
         if (err) {
           throw new Error(`Failed to publish sensor config: ${err}`);
