@@ -27,8 +27,8 @@ const logger = Winston.createLogger({
 let options = {
   winet_host: '',
   mqtt_url: '',
-  mqtt_password: '',
-  mqtt_username: '',
+  mqtt_password:undefined as string | undefined,
+  mqtt_username: undefined as string | undefined,
   winet_user: '',
   winet_pass: '',
   poll_interval: '10',
@@ -63,8 +63,7 @@ if (!options.mqtt_url) {
 
 const lang = 'en_us';
 const frequency = parseInt(options.poll_interval) || 10;
-const auth = { pw: options.mqtt_password, uname: options.mqtt_username }
-const mqtt = new MqttPublisher(logger, options.mqtt_url, auth.pw !== '' ? auth : undefined);
+const mqtt = new MqttPublisher(logger, options.mqtt_url,  options.mqtt_password,  options.mqtt_username);
 const winet = new winetHandler(
   logger,
   options.winet_host,
