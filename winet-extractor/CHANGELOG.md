@@ -1,3 +1,11 @@
+### 0.2.0
+
+- Handling of new Winet-S2 firmware which forces SSL. It will autodetect however if you know you have the newer firmware it's best to tick the new SSL checkbox.
+
+### 0.1.9
+
+- Improved running in standalone mode
+
 ### 0.1.8
 
 - Handle an error where the websocket connection fails to reconnect

@@ -1,6 +1,6 @@
 name: 'WiNet Extractor'
 description: 'Extracts data from WiNet devices and sends to Home Assistant over MQTT.'
-version: '0.1.9'
+version: '0.2.0'
 stage: 'stable'
 slug: 'winet-extractor'
 url: 'https://github.com/NickStallman/home-assistant-repo/tree/main/winet-extractor'
@@ -28,6 +28,7 @@ options:
   winet_pass: ''
   poll_interval: 10
   analytics: true
+  ssl: false
 
 schema:
   winet_host: str
@@ -36,3 +37,4 @@ schema:
   winet_pass: str?
   poll_interval: int(1,3600)
   analytics: bool
+  ssl: bool

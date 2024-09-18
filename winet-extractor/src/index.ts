@@ -31,6 +31,7 @@ let options = {
   winet_pass: '',
   poll_interval: '10',
   analytics: true,
+  ssl: false,
 };
 
 // Check if the file exists
@@ -46,6 +47,7 @@ if (fs.existsSync('/data/options.json')) {
   options.winet_pass = process.env.WINET_PASS || '';
   options.poll_interval = process.env.POLL_INTERVAL || '10';
   options.analytics = process.env.ANALYTICS === 'true';
+  options.ssl = process.env.SSL === 'true';
 }
 
 if (!options.winet_host) {
@@ -57,7 +59,7 @@ if (!options.mqtt_url) {
   throw new Error('No mqtt provided');
 }
 
-const lang = 'en_us';
+const lang = 'en_US';
 const frequency = parseInt(options.poll_interval) || 10;
 
 const mqtt = new MqttPublisher(logger, options.mqtt_url);
@@ -117,9 +119,14 @@ winet.setCallback((devices, deviceStatus) => {
   }
 });
 
-getProperties(options.winet_host).then(properties => {
-  logger.info('Fetched l18n properties.');
+getProperties(logger, options.winet_host, lang, options.ssl)
+  .then(result => {
+    logger.info(`Fetched i18n properties.`);
 
-  winet.setProperties(properties);
-  winet.connect();
-});
+    winet.setProperties(result.properties);
+    winet.connect(result.forceSsl);
+  })
+  .catch(err => {
+    logger.error('Failed to fetch l18n properties required to start.', err);
+    logger.error('Is the Winet IP address correct?');
+  });

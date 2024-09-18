@@ -20,6 +20,7 @@ export class winetHandler {
   private logger: Winston.Logger;
   private properties!: Properties;
   private host: string;
+  private ssl: boolean;
   private lang: string;
   private frequency: number;
   private callbackUpdatedStatus!: (
@@ -58,6 +59,7 @@ export class winetHandler {
   ) {
     this.logger = logger;
     this.host = host;
+    this.ssl = false;
     this.lang = lang;
     this.frequency = frequency;
     if (winetUser) {
@@ -86,7 +88,10 @@ export class winetHandler {
     this.callbackUpdatedStatus = callback;
   }
 
-  public connect(): void {
+  public connect(ssl?: boolean): void {
+    if (ssl !== undefined) {
+      this.ssl = ssl;
+    }
     this.token = '';
     this.currentDevice = undefined;
     this.inFlightDevice = undefined;
@@ -102,7 +107,18 @@ export class winetHandler {
     }
     this.watchdogLastData = Date.now();
 
-    this.ws = new Websocket(`ws://${this.host}:8082/ws/home/overview`);
+    const wsOptions = this.ssl
+      ? {
+          rejectUnauthorized: false, // Ignore self-signed certificate error
+        }
+      : {};
+
+    this.ws = new Websocket(
+      this.ssl
+        ? `wss://${this.host}:443/ws/home/overview`
+        : `ws://${this.host}:8082/ws/home/overview`,
+      wsOptions
+    );
 
     this.ws.on('open', this.onOpen.bind(this));
     this.ws.on('message', this.onMessage.bind(this));
@@ -162,7 +178,7 @@ export class winetHandler {
   }
 
   private onError(error: Websocket.ErrorEvent) {
-    this.logger.error('Websocket error:', error.message);
+    this.logger.error('Websocket error:', error);
     this.analytics.registerError('websocket_onError', error.message);
 
     if (this.watchdogInterval === undefined) {

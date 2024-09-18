@@ -12,16 +12,18 @@ export const MessageSchema = z.object({
 
 export const ConnectSchema = z.object({
   service: z.literal('connect'),
-  token: z.string().uuid(),
+  token: z.string(),
   uid: z.number().int(),
   tips_disable: z.number().int().optional(),
   ip: z.string().ip().optional(),
+  virgin_flag: z.number().int().optional(),
+  isFirstLogin: z.number().int().optional(),
   forceModifyPasswd: z.number().int().optional(),
 });
 
 export const LoginSchema = z.object({
   service: z.string(),
-  token: z.string().uuid(),
+  token: z.string(),
   uid: z.number().int(),
 });
 
