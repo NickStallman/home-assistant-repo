@@ -88,6 +88,26 @@ export class winetHandler {
     this.callbackUpdatedStatus = callback;
   }
 
+  public setWatchdog(): void {
+    this.watchdogInterval = setInterval(() => {
+      if (this.watchdogLastData === undefined) {
+        return;
+      }
+
+      const diff = Date.now() - this.watchdogLastData;
+      if (diff > this.frequency * 1000 * 6) {
+        this.logger.error('Watchdog triggered, reconnecting');
+        this.reconnect();
+      }
+    }, this.frequency * 1000);
+  }
+
+  public clearWatchdog(): void {
+    if (this.watchdogInterval !== undefined) {
+      clearInterval(this.watchdogInterval);
+    }
+  }
+
   public connect(ssl?: boolean): void {
     if (ssl !== undefined) {
       this.ssl = ssl;
@@ -102,10 +122,8 @@ export class winetHandler {
     if (this.scanInterval !== undefined) {
       clearInterval(this.scanInterval);
     }
-    if (this.watchdogInterval !== undefined) {
-      clearInterval(this.watchdogInterval);
-    }
     this.watchdogLastData = Date.now();
+    this.setWatchdog();
 
     const wsOptions = this.ssl
       ? {
@@ -132,9 +150,7 @@ export class winetHandler {
     if (this.scanInterval !== undefined) {
       clearInterval(this.scanInterval);
     }
-    if (this.watchdogInterval !== undefined) {
-      clearInterval(this.watchdogInterval);
-    }
+    this.clearWatchdog();
 
     setTimeout(
       () => {
@@ -161,18 +177,6 @@ export class winetHandler {
     this.scanInterval = setInterval(() => {
       if (this.currentDevice === undefined) {
         this.scanDevices();
-      }
-    }, this.frequency * 1000);
-
-    this.watchdogInterval = setInterval(() => {
-      if (this.watchdogLastData === undefined) {
-        return;
-      }
-
-      const diff = Date.now() - this.watchdogLastData;
-      if (diff > this.frequency * 1000 * 6) {
-        this.logger.error('Watchdog triggered, reconnecting');
-        this.reconnect();
       }
     }, this.frequency * 1000);
   }

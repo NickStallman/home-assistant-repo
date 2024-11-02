@@ -1,3 +1,7 @@
+### 0.2.1
+
+- Improved retry mechanism
+
 ### 0.2.0
 
 - Handling of new Winet-S2 firmware which forces SSL. It will autodetect however if you know you have the newer firmware it's best to tick the new SSL checkbox.
