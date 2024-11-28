@@ -404,7 +404,6 @@ export class winetHandler {
           var nameA = name + ' Current';
           var nameW = name + ' Power';
 
-          console.log('length', names.length);
           if(names.length > 1) {
             nameV = nameV.replace('{0}', names[1].replace('@', ''));
             nameA = nameA.replace('{0}', names[1].replace('@', ''));
