@@ -394,10 +394,22 @@ export class winetHandler {
 
         let mpptTotalW = 0;
         for (const data of directResult.data.list) {
-          const nameV = data.name + ' Voltage';
-          const nameA = data.name + ' Current';
-          const nameW = data.name + ' Power';
+          const names = data.name.split('%');
+          var name = this.properties[names[0]];
+          if (!name) {
+            name = data.name;
+          }
 
+          var nameV = name + ' Voltage';
+          var nameA = name + ' Current';
+          var nameW = name + ' Power';
+
+          console.log('length', names.length);
+          if(names.length > 1) {
+            nameV = nameV.replace('{0}', names[1].replace('@', ''));
+            nameA = nameA.replace('{0}', names[1].replace('@', ''));
+            nameW = nameW.replace('{0}', names[1].replace('@', ''));
+          }
           const dataPointV: DeviceStatus = {
             name: nameV,
             slug: slugify(nameV, {lower: true, strict: true, replacement: '_'}),
@@ -427,7 +439,9 @@ export class winetHandler {
             dirty: true,
           };
 
-          mpptTotalW += dataPointW.value as number;
+          if (dataPointW.value !== undefined && dataPointW.name.startsWith('mppt')) {
+            mpptTotalW += dataPointW.value as number;
+          }
 
           this.updateDeviceStatus(receivedDevice, dataPointV);
           this.updateDeviceStatus(receivedDevice, dataPointA);
