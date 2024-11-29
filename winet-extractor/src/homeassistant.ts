@@ -177,7 +177,7 @@ export class MqttPublisher {
     }
     if (slug === 'total_power_factor') {
       configPayload.device_class = 'power_factor';
-      configPayload.unit_of_measurement = 'no unit of measurement';
+      configPayload.unit_of_measurement = ' ';
     }
     if (configPayload.device_class === '') {
       delete configPayload.device_class;

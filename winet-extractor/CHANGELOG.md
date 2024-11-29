@@ -1,3 +1,8 @@
+### 0.2.2
+
+- Improved SH15T support with multiple paralleled strings
+- Tweak power_factor unit
+
 ### 0.2.1
 
 - Improved retry mechanism
