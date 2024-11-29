@@ -438,7 +438,7 @@ export class winetHandler {
             dirty: true,
           };
 
-          if (dataPointW.value !== undefined && dataPointW.name.startsWith('mppt')) {
+          if (dataPointW.value !== undefined && dataPointW.name.toLowerCase().startsWith('mppt')) {
             mpptTotalW += dataPointW.value as number;
           }
 
