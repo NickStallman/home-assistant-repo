@@ -26,6 +26,7 @@ export const DeviceClasses: Record<string, string | undefined> = {
 
 export const TextSensors: string[] = [
   'battery_operation_status',
+  'device_status',
   'running_status',
 ];
 
