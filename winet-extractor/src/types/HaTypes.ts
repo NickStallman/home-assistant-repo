@@ -2,7 +2,7 @@ export interface SensorData {
   name: string;
   value: number | string | undefined;
   unit_of_measurement: string;
-}
+};
 
 export const StateClasses: Record<string, string> = {
   W: 'measurement',
@@ -10,6 +10,7 @@ export const StateClasses: Record<string, string> = {
   A: 'measurement',
   '℃': 'measurement',
 };
+
 export const DeviceClasses: Record<string, string | undefined> = {
   W: 'power',
   V: 'voltage',
@@ -23,11 +24,6 @@ export const DeviceClasses: Record<string, string | undefined> = {
   '%': 'battery',
   kΩ: undefined,
 };
-
-export const TextSensors: string[] = [
-  'battery_operation_status',
-  'running_status',
-];
 
 export interface ConfigPayload {
   name: string;
@@ -43,4 +39,4 @@ export interface ConfigPayload {
   unit_of_measurement?: string;
   state_class?: string;
   device_class?: string;
-}
+};

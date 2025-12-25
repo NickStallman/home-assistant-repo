@@ -1,11 +1,10 @@
-import mqtt, {MqttClient} from 'mqtt';
-import {z} from 'zod';
-import {DeviceSchema} from './types/MessageTypes';
-import {DeviceStatus} from './types/DeviceStatus';
+import mqtt, { MqttClient } from 'mqtt';
+import { z } from 'zod';
+import { DeviceSchema } from './types/MessageTypes';
+import { DeviceStatus, isTextStatus } from './types/DeviceStatus';
 import {
   StateClasses,
   DeviceClasses,
-  TextSensors,
   ConfigPayload,
 } from './types/HaTypes';
 import Winston from 'winston';
@@ -29,45 +28,44 @@ export class MqttPublisher {
     });
   }
 
-  public publishData(
+  public publishText(
+    deviceSlug: string,
+    slug: string,
+    value: string | undefined
+  ) {
+    if (!this.connected) return;
+
+    const topic = `homeassistant/sensor/${deviceSlug}/${slug}/state`;
+    const payload = JSON.stringify({ value: value ?? '' });
+
+    this.client.publish(topic, payload, { retain: false }, err => {
+      if (err) {
+        throw new Error(`Failed to publish sensor data: ${err}`);
+      }
+    });
+  }
+
+  public publishNumeric(
     deviceSlug: string,
     slug: string,
     unit: string,
-    value: number | string | undefined
+    value: number
   ) {
-    if (!this.connected) {
-      return;
-    }
-    if (unit === 'kWp') {
-      unit = 'kW';
-    }
-    if (unit === '℃') {
-      unit = '°C';
-    }
-    if (unit === 'kvar' && typeof value === 'number') {
-      unit = 'var';
-      value = value * 1000;
-    }
-    if (unit === 'kVA' && typeof value === 'number') {
-      unit = 'VA';
-      value = value * 1000;
-    }
+    if (!this.connected) return;
+
+    // normalization
+    if (unit === 'kWp') unit = 'kW';
+    if (unit === '℃') unit = '°C';
+    if (unit === 'kvar') { unit = 'var'; value *= 1000; }
+    if (unit === 'kVA') { unit = 'VA'; value *= 1000; }
+
     const topic = `homeassistant/sensor/${deviceSlug}/${slug}/state`;
+    const payload = JSON.stringify({
+      value,
+      unit_of_measurement: unit,
+    });
 
-    const isTextSensor = TextSensors.includes(slug);
-    let payload = '';
-    if (isTextSensor) {
-      payload = JSON.stringify({
-        value: value?.toString() ?? '',
-      });
-    } else {
-      payload = JSON.stringify({
-        value: value,
-        unit_of_measurement: unit,
-      });
-    }
-
-    this.client.publish(topic, payload, {retain: false}, err => {
+    this.client.publish(topic, payload, { retain: false }, err => {
       if (err) {
         throw new Error(`Failed to publish sensor data: ${err}`);
       }
@@ -100,7 +98,7 @@ export class MqttPublisher {
     this.client.publish(
       configTopic,
       configPayload,
-      {retain: true, qos: 1},
+      { retain: true, qos: 1 },
       err => {
         if (err) {
           throw new Error(`Failed to publish register device: ${err}`);
@@ -123,7 +121,7 @@ export class MqttPublisher {
     const slug = deviceStatus.slug;
 
     const configTopic = `homeassistant/sensor/${deviceSlug}/${slug}/config`;
-    const isTextSensor = TextSensors.includes(slug);
+    const isTextSensor = isTextStatus(deviceStatus);
     const isNumeric = (n: number) => !isNaN(n) && isFinite(n);
     const valueTemplate = isNumeric(
       parseFloat(deviceStatus.value?.toString() || '')
@@ -189,7 +187,7 @@ export class MqttPublisher {
     this.client.publish(
       configTopic,
       JSON.stringify(configPayload),
-      {retain: true, qos: 1},
+      { retain: true, qos: 1 },
       err => {
         if (err) {
           throw new Error(`Failed to publish sensor config: ${err}`);

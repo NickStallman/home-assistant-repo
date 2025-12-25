@@ -10,6 +10,7 @@ const NumericUnits = [
   'Hz',
   'kVA',
   'kΩ',
+  'W'
 ];
 
 enum QueryStages {
@@ -48,4 +49,4 @@ DeviceTypeStages[46] = [QueryStages.REAL];
 DeviceTypeStages[47] = [QueryStages.REAL];
 DeviceTypeStages[48] = [QueryStages.REAL];
 
-export {NumericUnits, DeviceTypeStages, QueryStages};
+export { NumericUnits, DeviceTypeStages, QueryStages };

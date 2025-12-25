@@ -1,10 +1,11 @@
-import {getProperties} from './getProperties';
-import {winetHandler} from './winetHandler';
-import {MqttPublisher} from './homeassistant';
+import { getProperties } from './getProperties';
+import { winetHandler } from './winetHandler';
+import { MqttPublisher } from './homeassistant';
+import { isTextStatus, isNumericStatus } from './types/DeviceStatus';
 import Winston from 'winston';
 import fs from 'fs';
 import util from 'util';
-import {Analytics} from './analytics';
+import { Analytics } from './analytics';
 const dotenv = require('dotenv');
 
 const logger = Winston.createLogger({
@@ -14,7 +15,7 @@ const logger = Winston.createLogger({
       format: 'YYYY-MM-DD HH:mm:ss',
     }),
     Winston.format.printf(info => {
-      const {timestamp, level, message, ...extraData} = info;
+      const { timestamp, level, message, ...extraData } = info;
       return (
         `${timestamp} ${level}: ${message} ` +
         `${Object.keys(extraData).length ? util.format(extraData) : ''}`
@@ -96,15 +97,21 @@ winet.setCallback((devices, deviceStatus) => {
       const combinedSlug = `${deviceSlug}_${status.slug}`;
 
       if (!configuredSensors.includes(combinedSlug)) {
-        if (mqtt.publishConfig(deviceSlug, status, device)) {
+        if (status.value !== undefined && mqtt.publishConfig(deviceSlug, status, device)) {
           logger.info(`Configured sensor: ${deviceSlug} ${status.slug}`);
           configuredSensors.push(combinedSlug);
           updatedSensorsConfig++;
+        } else {
+          logger.debug(`Invalid sensor state: ${deviceSlug} ${status.slug}`);
         }
       }
 
       if (status.dirty) {
-        mqtt.publishData(deviceSlug, status.slug, status.unit, status.value);
+        if (isNumericStatus(status)) {
+          mqtt.publishNumeric(deviceSlug, status.slug, status.unit, status.value);
+        } else if (isTextStatus(status)) {
+          mqtt.publishText(deviceSlug, status.slug, status.value);
+        }
         status.dirty = false;
         updatedSensors++;
       }
