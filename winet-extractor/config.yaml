@@ -1,4 +1,4 @@
-name: 'WiNet Extractor'
+name: 'WiNet Extractor 2'
 description: 'Extracts data from WiNet devices and sends to Home Assistant over MQTT.'
 version: '0.2.2'
 stage: 'stable'
