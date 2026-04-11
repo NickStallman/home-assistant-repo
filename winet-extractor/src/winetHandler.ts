@@ -198,6 +198,7 @@ export class winetHandler {
       this.analytics.registerError('invalid_message', 'MessageSchema');
       this.logger.error('Invalid message:', {
         data: message,
+        errors: validationResult.error.format(),
       });
       return;
     }
@@ -337,18 +338,29 @@ export class winetHandler {
         const receivedDevice = this.inFlightDevice;
         this.inFlightDevice = undefined;
 
-        const realtimeResult = RealtimeSchema.safeParse(result_data);
-        if (!realtimeResult.success) {
-          this.analytics.registerError('realtimeSchema', 'successFalse');
-          this.logger.error('Invalid realtime message:', {
-            data: message,
-          });
-          this.reconnect();
+        if (receivedDevice === undefined) {
+          this.logger.error('Received realtime data without a current device');
           return;
         }
 
-        if (receivedDevice === undefined) {
-          this.logger.error('Received realtime data without a current device');
+        // Fix for devices like AC007E01 that omit data_unit for some fields (e.g. timestamps)
+        // We provide a fallback to ensure Zod schema validation passes.
+        if (result_data && Array.isArray((result_data as any).list)) {
+          (result_data as any).list = (result_data as any).list.map((item: any) => ({
+            data_unit: '',
+            ...item,
+          }));
+        }
+
+        const realtimeResult = RealtimeSchema.safeParse(result_data);
+        if (!realtimeResult.success) {
+          this.analytics.registerError('realtimeSchema', 'successFalse');
+          const device = this.devices.find(d => d.dev_id === receivedDevice);
+          this.logger.error(`Invalid realtime message for device ${device?.dev_model ?? receivedDevice}:`, {
+            data: JSON.stringify(message),
+            errors: realtimeResult.error.format(),
+          });
+          this.scanDevices();
           return;
         }
 
@@ -357,7 +369,7 @@ export class winetHandler {
           const dataPoint: DeviceStatus = {
             name: name,
             slug: slugify(name, {lower: true, strict: true, replacement: '_'}),
-            value: NumericUnits.includes(data.data_unit)
+            value: (NumericUnits.includes(data.data_unit) || ['Wh', '%'].includes(data.data_unit))
               ? data.data_value === '--'
                 ? undefined
                 : parseFloat(data.data_value)
@@ -378,17 +390,20 @@ export class winetHandler {
         const receivedDevice = this.inFlightDevice;
         this.inFlightDevice = undefined;
 
-        const directResult = DirectSchema.safeParse(result_data);
-        if (!directResult.success) {
-          this.analytics.registerError('directSchema', 'successFalse');
-          this.logger.error('Invalid direct message:', {
-            data: message,
-          });
+        if (receivedDevice === undefined) {
+          this.logger.error('Received direct data without a current device');
           return;
         }
 
-        if (receivedDevice === undefined) {
-          this.logger.error('Received direct data without a current device');
+        const directResult = DirectSchema.safeParse(result_data);
+        if (!directResult.success) {
+          this.analytics.registerError('directSchema', 'successFalse');
+          const device = this.devices.find(d => d.dev_id === receivedDevice);
+          this.logger.error(`Invalid direct message for device ${device?.dev_model ?? receivedDevice}:`, {
+            data: JSON.stringify(message),
+            errors: directResult.error.format(),
+          });
+          this.scanDevices();
           return;
         }
 

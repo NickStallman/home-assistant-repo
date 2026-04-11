@@ -61,6 +61,10 @@ export class MqttPublisher {
       unit = 'VA';
       value *= 1000;
     }
+    if (unit === 'Wh') {
+      unit = 'kWh';
+      value /= 1000;
+    }
 
     const topic = `${this.prefix}/sensor/${deviceSlug}/${slug}/state`;
     const payload = JSON.stringify({
@@ -164,6 +168,9 @@ export class MqttPublisher {
         break;
       case 'kVA':
         configPayload.unit_of_measurement = 'VA';
+        break;
+      case 'Wh':
+        configPayload.unit_of_measurement = 'kWh';
         break;
     }
 
