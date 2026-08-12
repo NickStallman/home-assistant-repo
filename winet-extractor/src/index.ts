@@ -73,7 +73,7 @@ const winet = new winetHandler(
   frequency,
   options.winet_user || '',
   options.winet_pass || '',
-  new Analytics(options.analytics || true)
+  new Analytics(options.analytics ?? true)
 );
 
 const configuredSensors: string[] = [];
