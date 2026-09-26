@@ -1,0 +1,42 @@
+configuration:
+  winet_host:
+    name: WiNet host(s)
+    description: >-
+      IP address or hostname of your WiNet dongle. For multiple inverters with
+      their own WiNet, separate hosts with commas, e.g.
+      "192.168.1.100, 192.168.1.101". They all use the username, password and
+      SSL settings below.
+  mqtt_url:
+    name: MQTT URL
+    description: "Format: mqtt://<username>:<password>@<host>"
+  mqtt_prefix:
+    name: MQTT discovery prefix
+    description: Home Assistant discovery prefix, normally "homeassistant".
+  winet_user:
+    name: WiNet username
+    description: Leave blank to use the default (admin).
+  winet_pass:
+    name: WiNet password
+    description: Leave blank to use the default (pw8888).
+  poll_interval:
+    name: Poll interval
+    description: Seconds between queries to each WiNet.
+  analytics:
+    name: Anonymous analytics
+    description: >-
+      Share anonymous device models and error states to help improve
+      compatibility.
+  ssl:
+    name: Force SSL
+    description: >-
+      Newer WiNet-S2 firmware requires SSL. This is detected automatically.
+  site_totals:
+    name: Site totals
+    description: >-
+      With two or more inverters, publish a "WiNet Site" device that adds up
+      PV power and yield across all of them.
+  additional_winets:
+    name: Additional WiNets
+    description: >-
+      Optional. Extra WiNet dongles that need their own credentials. Any field
+      left out uses the values above.

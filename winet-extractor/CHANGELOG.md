@@ -1,3 +1,20 @@
+### 0.3.0
+
+- **Multiple WiNet support.** Enter several hosts in `winet_host` separated by commas (they share the username/password), or add WiNets with their own credentials under `additional_winets`. Existing configurations keep working unchanged and no entities are renamed (#9)
+- New "WiNet Site" device that adds PV power and yield across all inverters (can be turned off with `site_totals`)
+- Entities go unavailable when the addon stops or a WiNet is disconnected
+- Discovery is re-sent when Home Assistant or the MQTT broker restarts, and new sensors no longer show "unknown" until their value changes
+- Fixed the MQTT prefix becoming `undefined` for installs that predate the `mqtt_prefix` option (#74)
+- Fixed the analytics opt-out being ignored. Thanks @maxkpower (#84)
+- Fixed devices that omit units (e.g. Sungrow EV chargers) causing a reconnect loop, a bad reply from one device no longer disconnects the others. Thanks @ihatethecloud (#78, #79)
+- Fixed template warnings and `state_class` errors for text sensors and sensors reporting `--` (#73, #80, #81). These fixes were in the code previously but never released as a new version
+- Sensors in `h` and `Wh` (e.g. on-grid operating time, EV charger energy) are now published
+- Power factor is published as a number, `%` sensors are only tagged as battery level for SOC sensors, `VA` sensors use the apparent power device class
+- Removed the empty "device" sensor that older versions created for each device
+- Fixed a failed login crashing the addon, reconnect timers stacking up, and memory growth while the MQTT broker is down (#59)
+- Unsupported devices are logged with their device type to help add support (#85)
+- WiNet password fields are now masked in the configuration UI
+
 ### 0.2.2
 
 - Improved SH15T support with multiple paralleled strings

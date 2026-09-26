@@ -1,9 +1,8 @@
 import Websocket from 'ws';
-import {z} from 'zod';
 import {
   MessageSchema,
   ConnectSchema,
-  DeviceSchema,
+  Device,
   DeviceListSchema,
   RealtimeSchema,
   DirectSchema,
@@ -12,39 +11,61 @@ import {
 import slugify from 'slugify';
 import {Properties} from './types/Properties';
 import {DeviceStatus, DeviceStatusMap} from './types/DeviceStatus';
-import {DeviceTypeStages, NumericUnits, QueryStages} from './types/Constants';
+import {
+  DeviceTypeStages,
+  QueryStages,
+  UnitlessNumericSlugs,
+} from './types/Constants';
+import {getProperties} from './getProperties';
 import Winston from 'winston';
 import {Analytics} from './analytics';
 
+// Values are republished at least this often even when unchanged
+const REFRESH_INTERVAL = 300000;
+const MAX_RECONNECT_DELAY = 300000;
+
+export type StatusCallback = (
+  handler: winetHandler,
+  devices: Device[],
+  deviceStatus: Record<string, DeviceStatusMap>
+) => void;
+
+export type ConnectionCallback = (
+  handler: winetHandler,
+  connected: boolean
+) => void;
+
 export class winetHandler {
+  public readonly host: string;
   private logger: Winston.Logger;
-  private properties!: Properties;
-  private host: string;
+  private properties: Properties = {};
   private ssl: boolean;
   private lang: string;
   private frequency: number;
-  private callbackUpdatedStatus!: (
-    devices: z.infer<typeof DeviceSchema>[],
-    deviceStatus: DeviceStatusMap[]
-  ) => void;
-  private ws!: Websocket;
+  private callbackUpdatedStatus?: StatusCallback;
+  private callbackConnection?: ConnectionCallback;
+  private ws?: Websocket;
   private analytics: Analytics;
 
-  private winetUser = '';
-  private winetPass = '';
+  private winetUser: string;
+  private winetPass: string;
 
   private token = '';
   private currentDevice: number | undefined = undefined;
   private inFlightDevice: number | undefined = undefined;
   private currentStages: QueryStages[] = [];
 
-  private devices: z.infer<typeof DeviceSchema>[] = [];
-  private deviceStatus: DeviceStatusMap[] = [];
-  private lastDeviceUpdate: Record<string, Date> = {};
-  private watchdogCount = 0;
-  private watchdogLastData: number | undefined = undefined;
+  private devices: Device[] = [];
+  // Keyed by device serial number, which is stable across reconnects
+  private deviceStatus: Record<string, DeviceStatusMap> = {};
+  private skippedDevices = new Set<string>();
+  private stallCount = 0;
+  private lastData: number | undefined = undefined;
   private winetVersion: number | undefined = undefined;
+  private connected = false;
 
+  private reconnectAttempts = 0;
+  private reconnectTimer: NodeJS.Timeout | undefined = undefined;
   private scanInterval: NodeJS.Timeout | undefined = undefined;
   private watchdogInterval: NodeJS.Timeout | undefined = undefined;
 
@@ -55,112 +76,152 @@ export class winetHandler {
     frequency: number,
     winetUser: string,
     winetPass: string,
+    ssl: boolean,
     analytics: Analytics
   ) {
     this.logger = logger;
     this.host = host;
-    this.ssl = false;
+    this.ssl = ssl;
     this.lang = lang;
     this.frequency = frequency;
-    if (winetUser) {
-      this.winetUser = winetUser;
-    } else {
-      this.winetUser = 'admin';
-    }
-    if (winetPass) {
-      this.winetPass = winetPass;
-    } else {
-      this.winetPass = 'pw8888';
-    }
+    this.winetUser = winetUser || 'admin';
+    this.winetPass = winetPass || 'pw8888';
     this.analytics = analytics;
   }
 
-  public setProperties(properties: Properties): void {
-    this.properties = properties;
-  }
-
-  public setCallback(
-    callback: (
-      devices: z.infer<typeof DeviceSchema>[],
-      deviceStatus: DeviceStatusMap[]
-    ) => void
-  ): void {
+  public setCallback(callback: StatusCallback): void {
     this.callbackUpdatedStatus = callback;
   }
 
-  public setWatchdog(): void {
-    this.watchdogInterval = setInterval(() => {
-      if (this.watchdogLastData === undefined) {
-        return;
-      }
-
-      const diff = Date.now() - this.watchdogLastData;
-      if (diff > this.frequency * 1000 * 6) {
-        this.logger.error('Watchdog triggered, reconnecting');
-        this.reconnect();
-      }
-    }, this.frequency * 1000);
+  public setConnectionCallback(callback: ConnectionCallback): void {
+    this.callbackConnection = callback;
   }
 
-  public clearWatchdog(): void {
+  public getDevices(): Device[] {
+    return this.devices;
+  }
+
+  // Fetch the i18n labels, retrying until the WiNet is reachable, then connect
+  public start(retryDelay = 10000): void {
+    getProperties(this.logger, this.host, this.lang, this.ssl)
+      .then(result => {
+        this.logger.info('Fetched i18n properties.');
+        this.properties = result.properties;
+        this.ssl = result.forceSsl;
+        this.connect();
+      })
+      .catch(err => {
+        this.logger.error(`Failed to fetch i18n properties: ${err.message}`);
+        this.logger.warn(
+          `WiNet unreachable. Retrying in ${Math.round(retryDelay / 1000)}s...`
+        );
+        const nextDelay = Math.min(retryDelay * 1.5, 60000);
+        setTimeout(() => this.start(nextDelay), retryDelay);
+      });
+  }
+
+  private setConnected(connected: boolean) {
+    if (this.connected === connected) return;
+    this.connected = connected;
+    this.callbackConnection?.(this, connected);
+  }
+
+  private clearTimers(): void {
+    if (this.scanInterval !== undefined) {
+      clearInterval(this.scanInterval);
+      this.scanInterval = undefined;
+    }
     if (this.watchdogInterval !== undefined) {
       clearInterval(this.watchdogInterval);
+      this.watchdogInterval = undefined;
     }
   }
 
-  public connect(ssl?: boolean): void {
-    if (ssl !== undefined) {
-      this.ssl = ssl;
-    }
+  private closeSocket(): void {
+    if (this.ws === undefined) return;
+    const ws = this.ws;
+    this.ws = undefined;
+    ws.removeAllListeners();
+    // Swallow errors from a socket we're discarding
+    ws.on('error', () => {});
+    ws.terminate();
+  }
+
+  private connect(): void {
+    this.closeSocket();
+    this.clearTimers();
+
     this.token = '';
     this.currentDevice = undefined;
     this.inFlightDevice = undefined;
     this.currentStages = [];
-    this.watchdogCount = 0;
+    this.stallCount = 0;
     this.winetVersion = undefined;
+    this.lastData = Date.now();
 
-    if (this.scanInterval !== undefined) {
-      clearInterval(this.scanInterval);
-    }
-    this.watchdogLastData = Date.now();
-    this.setWatchdog();
+    this.watchdogInterval = setInterval(() => {
+      if (
+        this.lastData !== undefined &&
+        Date.now() - this.lastData > this.frequency * 1000 * 6
+      ) {
+        this.analytics.registerReconnect('watchdog');
+        this.reconnect('Watchdog triggered, no data received');
+      }
+    }, this.frequency * 1000);
 
-    const wsOptions = this.ssl
-      ? {
-          rejectUnauthorized: false, // Ignore self-signed certificate error
-        }
-      : {};
+    const url = this.ssl
+      ? `wss://${this.host}:443/ws/home/overview`
+      : `ws://${this.host}:8082/ws/home/overview`;
+    this.logger.info(`Connecting to ${url}`);
 
-    this.ws = new Websocket(
-      this.ssl
-        ? `wss://${this.host}:443/ws/home/overview`
-        : `ws://${this.host}:8082/ws/home/overview`,
-      wsOptions
+    const ws = new Websocket(
+      url,
+      // Ignore self-signed certificate error
+      this.ssl ? {rejectUnauthorized: false} : {}
     );
+    this.ws = ws;
 
-    this.ws.on('open', this.onOpen.bind(this));
-    this.ws.on('message', this.onMessage.bind(this));
-    this.ws.on('error', this.onError.bind(this));
+    ws.on('open', this.onOpen.bind(this));
+    ws.on('message', this.onMessage.bind(this));
+    ws.on('error', this.onError.bind(this));
+    ws.on('close', (code: number) => {
+      if (this.ws === ws) {
+        this.reconnect(`Websocket closed (${code})`);
+      }
+    });
   }
 
-  public reconnect(): void {
-    this.ws.close();
-    this.logger.warn('Reconnecting to Winet');
-
-    if (this.scanInterval !== undefined) {
-      clearInterval(this.scanInterval);
+  // Tear down the connection and try again later. Safe to call repeatedly.
+  public reconnect(reason: string): void {
+    if (this.reconnectTimer !== undefined) {
+      return;
     }
-    this.clearWatchdog();
 
-    setTimeout(
-      () => {
-        this.connect();
-      },
-      this.frequency * 1000 * 3
+    this.closeSocket();
+    this.clearTimers();
+
+    const delay = Math.min(
+      this.frequency * 1000 * 3 * 2 ** this.reconnectAttempts,
+      MAX_RECONNECT_DELAY
     );
+    this.reconnectAttempts++;
+    this.logger.warn(`${reason}. Reconnecting in ${Math.round(delay / 1000)}s`);
+
+    // Allow a quick reconnect to happen without flagging the data as stale
+    if (this.reconnectAttempts > 1) {
+      this.setConnected(false);
+    }
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined;
+      this.connect();
+    }, delay);
   }
 
   private sendPacket(data: Record<string, string | number>): void {
+    if (this.ws?.readyState !== Websocket.OPEN) {
+      return;
+    }
     const packet = {
       lang: this.lang,
       token: this.token,
@@ -175,23 +236,44 @@ export class winetHandler {
     });
 
     this.scanInterval = setInterval(() => {
-      if (this.currentDevice === undefined) {
+      if (this.currentDevice === undefined && this.devices.length > 0) {
         this.scanDevices();
       }
     }, this.frequency * 1000);
   }
 
-  private onError(error: Websocket.ErrorEvent) {
-    this.logger.error('Websocket error:', error);
+  private onError(error: Error) {
+    this.logger.error(`Websocket error: ${error.message}`);
     this.analytics.registerError('websocket_onError', error.message);
+    this.reconnect('Websocket error');
+  }
 
-    if (this.watchdogInterval === undefined) {
-      this.reconnect();
+  private translate(value: string): string {
+    return this.properties[value] ?? value;
+  }
+
+  private parseValue(
+    raw: string,
+    numeric: boolean
+  ): string | number | undefined {
+    if (raw === '--' || raw.trim() === '') {
+      return undefined;
     }
+    if (numeric) {
+      const value = Number(raw);
+      return Number.isFinite(value) ? value : undefined;
+    }
+    return raw.startsWith('I18N_') ? this.translate(raw) : raw;
   }
 
   private onMessage(data: Websocket.Data) {
-    const message = JSON.parse(data.toString());
+    let message: unknown;
+    try {
+      message = JSON.parse(data.toString());
+    } catch (err) {
+      this.logger.error(`Unparseable message: ${data.toString()}`);
+      return;
+    }
     const validationResult = MessageSchema.safeParse(message);
 
     if (!validationResult.success) {
@@ -205,13 +287,12 @@ export class winetHandler {
     const typedMessage = validationResult.data;
 
     if (typedMessage.result_msg === 'I18N_COMMON_INTER_ABNORMAL') {
-      this.logger.error('Winet disconnect: Internal Error');
       this.analytics.registerError('winetError', 'INTER_ABNORMAL');
-      this.reconnect();
+      this.reconnect('WiNet disconnect: Internal Error');
       return;
     }
 
-    this.watchdogLastData = Date.now();
+    this.lastData = Date.now();
 
     const result_code = typedMessage.result_code;
     const result_data = typedMessage.result_data;
@@ -229,12 +310,6 @@ export class winetHandler {
         }
         const connectData = connectResult.data;
 
-        if (connectData.token === undefined) {
-          this.analytics.registerError('connectSchema', 'tokenMissing');
-          this.logger.error('Token is missing');
-          return;
-        }
-
         if (connectData.ip === undefined) {
           this.logger.info('Connected to a older Winet-S device');
           this.winetVersion = 1;
@@ -249,7 +324,7 @@ export class winetHandler {
           );
           this.winetVersion = 2;
         }
-        this.analytics.registerVersion(this.winetVersion);
+        this.analytics.registerVersion(this.host, this.winetVersion);
 
         this.token = connectData.token;
 
@@ -263,30 +338,28 @@ export class winetHandler {
         break;
       }
       case 'login': {
+        if (result_code !== 1) {
+          this.analytics.registerError('loginSchema', 'resultCodeFail');
+          this.logger.error(
+            `Failed to authenticate (${typedMessage.result_msg ?? result_code}). ` +
+              'Check the WiNet username and password.'
+          );
+          this.reconnect('Authentication failed');
+          return;
+        }
+
         const loginResult = LoginSchema.safeParse(result_data);
         if (!loginResult.success) {
           this.analytics.registerError('loginSchema', 'successFalse');
           this.logger.error('Invalid login message:', {
             data: message,
           });
-          return;
-        }
-        const loginData = loginResult.data;
-
-        if (loginData.token === undefined) {
-          this.analytics.registerError('loginSchema', 'tokenMissing');
-          this.logger.error('Authenticated Token is missing');
+          this.reconnect('Invalid login response');
           return;
         }
 
-        if (result_code === 1) {
-          this.logger.info('Authenticated successfully');
-        } else {
-          this.analytics.registerError('loginSchema', 'resultCodeFail');
-          throw new Error('Failed to authenticate');
-        }
-
-        this.token = loginData.token;
+        this.logger.info('Authenticated successfully');
+        this.token = loginResult.data.token;
 
         this.sendPacket({
           service: 'devicelist',
@@ -302,32 +375,19 @@ export class winetHandler {
           this.logger.error('Invalid devicelist message:', {
             data: message,
           });
+          this.reconnect('Invalid device list');
           return;
         }
-        const deviceListData = deviceListResult.data;
-        for (const device of deviceListData.list) {
-          if (DeviceTypeStages[device.dev_type].length === 0) {
-            this.logger.info(
-              'Skipping device:',
-              device.dev_name,
-              device.dev_sn
-            );
-            continue;
-          }
+        this.updateDeviceList(deviceListResult.data.list);
 
-          // If devices are not already in the list, add them
-          if (this.devices.findIndex(d => d.dev_sn === device.dev_sn) === -1) {
-            this.deviceStatus[device.dev_id] = {};
-            device.dev_model = device.dev_model.replace(/[^a-zA-Z0-9]/g, '');
-            device.dev_sn = device.dev_sn.replace(/[^a-zA-Z0-9]/g, '');
-            this.logger.info(
-              `Detected device: ${device.dev_model} (${device.dev_sn})`
-            );
-            this.devices.push(device);
-          }
+        if (this.devices.length === 0) {
+          this.reconnect('No supported devices found');
+          return;
         }
 
-        this.analytics.registerDevices(this.devices);
+        this.reconnectAttempts = 0;
+        this.setConnected(true);
+        this.analytics.registerDevices(this.host, this.devices);
 
         this.scanDevices();
         break;
@@ -337,39 +397,42 @@ export class winetHandler {
         const receivedDevice = this.inFlightDevice;
         this.inFlightDevice = undefined;
 
-        const realtimeResult = RealtimeSchema.safeParse(result_data);
-        if (!realtimeResult.success) {
-          this.analytics.registerError('realtimeSchema', 'successFalse');
-          this.logger.error('Invalid realtime message:', {
-            data: message,
-          });
-          this.reconnect();
-          return;
-        }
-
         if (receivedDevice === undefined) {
           this.logger.error('Received realtime data without a current device');
           return;
         }
 
-        for (const data of realtimeResult.data.list) {
-          const name = this.properties[data.data_name] || data.data_name;
-          const dataPoint: DeviceStatus = {
-            name: name,
-            slug: slugify(name, {lower: true, strict: true, replacement: '_'}),
-            value:
-              data.data_value === '--'
-                ? undefined
-                : NumericUnits.includes(data.data_unit)
-                  ? parseFloat(data.data_value)
-                  : data.data_value.startsWith('I18N_')
-                    ? this.properties[data.data_value]
-                    : data.data_value,
-            unit: data.data_unit,
-            dirty: true,
-          };
+        const realtimeResult = RealtimeSchema.safeParse(result_data);
+        if (!realtimeResult.success) {
+          this.analytics.registerError('realtimeSchema', 'successFalse');
+          this.logger.error(
+            `Invalid realtime message for ${this.describeDevice(receivedDevice)}`,
+            {
+              data: JSON.stringify(message),
+              errors: JSON.stringify(realtimeResult.error.format()),
+            }
+          );
+          this.scanDevices();
+          return;
+        }
 
-          this.updateDeviceStatus(receivedDevice, dataPoint);
+        for (const data of realtimeResult.data.list) {
+          const name = this.translate(data.data_name);
+          const slug = slugify(name, {
+            lower: true,
+            strict: true,
+            replacement: '_',
+          });
+          const numeric =
+            data.data_unit !== '' || UnitlessNumericSlugs.includes(slug);
+
+          this.updateDeviceStatus(receivedDevice, {
+            name,
+            slug,
+            value: this.parseValue(data.data_value, numeric),
+            unit: data.data_unit,
+            numeric,
+          });
         }
 
         this.scanDevices();
@@ -379,27 +442,29 @@ export class winetHandler {
         const receivedDevice = this.inFlightDevice;
         this.inFlightDevice = undefined;
 
-        const directResult = DirectSchema.safeParse(result_data);
-        if (!directResult.success) {
-          this.analytics.registerError('directSchema', 'successFalse');
-          this.logger.error('Invalid direct message:', {
-            data: message,
-          });
+        if (receivedDevice === undefined) {
+          this.logger.error('Received direct data without a current device');
           return;
         }
 
-        if (receivedDevice === undefined) {
-          this.logger.error('Received direct data without a current device');
+        const directResult = DirectSchema.safeParse(result_data);
+        if (!directResult.success) {
+          this.analytics.registerError('directSchema', 'successFalse');
+          this.logger.error(
+            `Invalid direct message for ${this.describeDevice(receivedDevice)}`,
+            {
+              data: JSON.stringify(message),
+              errors: JSON.stringify(directResult.error.format()),
+            }
+          );
+          this.scanDevices();
           return;
         }
 
         let mpptTotalW = 0;
         for (const data of directResult.data.list) {
           const names = data.name.split('%');
-          let name = this.properties[names[0]];
-          if (!name) {
-            name = data.name;
-          }
+          const name = this.properties[names[0]] || data.name;
 
           let nameV = name + ' Voltage';
           let nameA = name + ' Current';
@@ -410,55 +475,55 @@ export class winetHandler {
             nameA = nameA.replace('{0}', names[1].replace('@', ''));
             nameW = nameW.replace('{0}', names[1].replace('@', ''));
           }
-          const dataPointV: DeviceStatus = {
+
+          const voltage = this.parseValue(data.voltage, true) as
+            | number
+            | undefined;
+          const current = this.parseValue(data.current, true) as
+            | number
+            | undefined;
+          const power =
+            voltage === undefined || current === undefined
+              ? undefined
+              : Math.round(current * voltage * 100) / 100;
+
+          const slugOf = (n: string) =>
+            slugify(n, {lower: true, strict: true, replacement: '_'});
+
+          this.updateDeviceStatus(receivedDevice, {
             name: nameV,
-            slug: slugify(nameV, {lower: true, strict: true, replacement: '_'}),
-            value: data.voltage === '--' ? undefined : parseFloat(data.voltage),
+            slug: slugOf(nameV),
+            value: voltage,
             unit: data.voltage_unit,
-            dirty: true,
-          };
-
-          const dataPointA: DeviceStatus = {
+            numeric: true,
+          });
+          this.updateDeviceStatus(receivedDevice, {
             name: nameA,
-            slug: slugify(nameA, {lower: true, strict: true, replacement: '_'}),
-            value: data.current === '--' ? undefined : parseFloat(data.current),
+            slug: slugOf(nameA),
+            value: current,
             unit: data.current_unit,
-            dirty: true,
-          };
-
-          const dataPointW: DeviceStatus = {
+            numeric: true,
+          });
+          this.updateDeviceStatus(receivedDevice, {
             name: nameW,
-            slug: slugify(nameW, {lower: true, strict: true, replacement: '_'}),
-            value:
-              data.current === '--'
-                ? undefined
-                : Math.round(
-                    parseFloat(data.current) * parseFloat(data.voltage) * 100
-                  ) / 100,
+            slug: slugOf(nameW),
+            value: power,
             unit: 'W',
-            dirty: true,
-          };
+            numeric: true,
+          });
 
-          if (
-            dataPointW.value !== undefined &&
-            dataPointW.name.toLowerCase().startsWith('mppt')
-          ) {
-            mpptTotalW += dataPointW.value as number;
+          if (power !== undefined && nameW.toLowerCase().startsWith('mppt')) {
+            mpptTotalW += power;
           }
-
-          this.updateDeviceStatus(receivedDevice, dataPointV);
-          this.updateDeviceStatus(receivedDevice, dataPointA);
-          this.updateDeviceStatus(receivedDevice, dataPointW);
         }
 
-        const dataPointTotalW: DeviceStatus = {
+        this.updateDeviceStatus(receivedDevice, {
           name: 'MPPT Total Power',
           slug: 'mppt_total_power',
           value: Math.round(mpptTotalW * 100) / 100,
           unit: 'W',
-          dirty: true,
-        };
-        this.updateDeviceStatus(receivedDevice, dataPointTotalW);
+          numeric: true,
+        });
 
         this.scanDevices();
         break;
@@ -466,8 +531,7 @@ export class winetHandler {
       case 'notice': {
         this.analytics.registerError('notice', result_code + '');
         if (result_code === 100) {
-          this.logger.info('Websocket got timed out');
-          this.reconnect();
+          this.reconnect('Websocket got timed out');
         } else {
           this.logger.error('Received notice', {
             data: message,
@@ -477,39 +541,100 @@ export class winetHandler {
       }
       default:
         this.analytics.registerError('unknownService', service);
-        this.logger.error('Received unknown message:', data);
+        this.logger.error('Received unknown message:', {data: message});
     }
   }
 
-  private updateDeviceStatus(device: number, dataPoint: DeviceStatus) {
-    const combinedName = `${device}_${dataPoint.slug}`;
-    const oldDataPoint = this.deviceStatus[device][dataPoint.slug];
-    if (
-      oldDataPoint === undefined ||
-      oldDataPoint.value !== dataPoint.value ||
-      this.lastDeviceUpdate[combinedName] === undefined ||
-      new Date().getTime() - this.lastDeviceUpdate[combinedName].getTime() >
-        300000
-    ) {
-      this.deviceStatus[device][dataPoint.slug] = dataPoint;
-      this.lastDeviceUpdate[combinedName] = new Date();
+  private updateDeviceList(list: Device[]) {
+    const devices: Device[] = [];
+
+    for (const device of list) {
+      device.dev_model = device.dev_model.replace(/[^a-zA-Z0-9]/g, '');
+      device.dev_sn = device.dev_sn.replace(/[^a-zA-Z0-9]/g, '');
+
+      if ((DeviceTypeStages[device.dev_type] ?? []).length === 0) {
+        const key = `${device.dev_type}_${device.dev_sn}`;
+        if (!this.skippedDevices.has(key)) {
+          this.skippedDevices.add(key);
+          this.logger.info(
+            `Skipping unsupported device: ${device.dev_name} ` +
+              `(${device.dev_sn}, dev_type ${device.dev_type})`
+          );
+          this.analytics.registerError(
+            'unsupportedDevice',
+            `${device.dev_model}:${device.dev_type}`
+          );
+        }
+        continue;
+      }
+
+      if (this.devices.findIndex(d => d.dev_sn === device.dev_sn) === -1) {
+        this.logger.info(
+          `Detected device: ${device.dev_model} (${device.dev_sn})`
+        );
+      }
+      this.deviceStatus[device.dev_sn] ??= {};
+      devices.push(device);
     }
+
+    // dev_id can change between sessions, so always use the latest list
+    this.devices = devices;
+  }
+
+  private describeDevice(devId: number): string {
+    const device = this.devices.find(d => d.dev_id === devId);
+    return device
+      ? `${device.dev_model} (${device.dev_sn})`
+      : `dev_id ${devId}`;
+  }
+
+  private updateDeviceStatus(
+    devId: number,
+    reading: Pick<DeviceStatus, 'name' | 'slug' | 'value' | 'unit' | 'numeric'>
+  ) {
+    const device = this.devices.find(d => d.dev_id === devId);
+    if (device === undefined) return;
+
+    const statusMap = this.deviceStatus[device.dev_sn];
+    const oldDataPoint = statusMap[reading.slug];
+    const now = Date.now();
+
+    if (
+      oldDataPoint !== undefined &&
+      oldDataPoint.value === reading.value &&
+      now - oldDataPoint.changedAt <= REFRESH_INTERVAL
+    ) {
+      oldDataPoint.seenAt = now;
+      return;
+    }
+
+    statusMap[reading.slug] = {
+      ...reading,
+      dirty: true,
+      seenAt: now,
+      changedAt: now,
+    };
   }
 
   private scanDevices() {
+    if (this.devices.length === 0) {
+      return;
+    }
+
     if (this.inFlightDevice !== undefined) {
       this.analytics.registerError('scanDevices', 'inFlightDevice');
       this.logger.info(
         `Skipping scanDevices, in flight device: ${this.inFlightDevice}`
       );
-      this.watchdogCount++;
-      if (this.watchdogCount > 5) {
+      this.stallCount++;
+      if (this.stallCount > 5) {
         this.analytics.registerError('scanDevices', 'watchdogTriggered');
-        this.logger.error('Watchdog triggered, reconnecting');
-        this.reconnect();
+        this.reconnect('Query timed out');
       }
       return;
     }
+    this.stallCount = 0;
+
     if (this.currentDevice === undefined) {
       this.currentDevice = this.devices[0].dev_id;
       this.currentStages = [...DeviceTypeStages[this.devices[0].dev_type]];
@@ -518,9 +643,9 @@ export class winetHandler {
         device => device.dev_id === this.currentDevice
       );
       const nextIndex = currentIndex + 1;
-      if (nextIndex >= this.devices.length) {
+      if (currentIndex === -1 || nextIndex >= this.devices.length) {
         this.currentDevice = undefined;
-        this.callbackUpdatedStatus(this.devices, this.deviceStatus);
+        this.callbackUpdatedStatus?.(this, this.devices, this.deviceStatus);
         return;
       }
       this.currentDevice = this.devices[nextIndex].dev_id;
@@ -543,7 +668,7 @@ export class winetHandler {
         service = 'real_battery';
         break;
       default:
-        this.logger.error('Unknown query stage:', nextStage);
+        this.logger.error(`Unknown query stage: ${nextStage}`);
         return;
     }
 

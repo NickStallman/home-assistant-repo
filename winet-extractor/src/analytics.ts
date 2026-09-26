@@ -1,31 +1,46 @@
 import {PostHog} from 'posthog-node';
 import crypto from 'crypto';
-import {DeviceSchema} from './types/MessageTypes';
-import z from 'zod';
+import {Device} from './types/MessageTypes';
 
 export class Analytics {
   private id = '';
   private enabled: boolean;
-  private posthog;
-  private winetVersion = 0;
-  private devices: z.infer<typeof DeviceSchema>[] = [];
+  private posthog: PostHog | undefined;
+  // Keyed by WiNet host so multiple dongles don't overwrite each other
+  private winetVersions = new Map<string, number>();
+  private devices = new Map<string, Device[]>();
   private devicePingInterval: NodeJS.Timeout | undefined = undefined;
 
   constructor(enabled: boolean) {
     this.enabled = enabled;
 
-    this.posthog = new PostHog(
-      'phc_Xl9GlMHjhpVc9pGwR2U1Qga4e1pUaRPD2IrLGMy11eY',
-      {host: 'https://posthog.nickstallman.net'}
-    );
-
     if (this.enabled) {
+      this.posthog = new PostHog(
+        'phc_Xl9GlMHjhpVc9pGwR2U1Qga4e1pUaRPD2IrLGMy11eY',
+        {host: 'https://posthog.nickstallman.net'}
+      );
       setInterval(this.ping.bind(this), 1000 * 60 * 60);
     }
   }
 
-  public registerDevices(devices: z.infer<typeof DeviceSchema>[]) {
-    this.devices = devices;
+  private get winetVersion(): number {
+    return Math.max(0, ...this.winetVersions.values());
+  }
+
+  private allDevices(): Device[] {
+    return [...this.devices.values()].flat();
+  }
+
+  public registerDevices(host: string, devices: Device[]) {
+    const previous = this.devices.get(host);
+    const same =
+      previous !== undefined &&
+      previous.map(d => d.dev_sn).join() === devices.map(d => d.dev_sn).join();
+    this.devices.set(host, [...devices]);
+    if (same) {
+      return;
+    }
+
     this.pingDevices();
 
     if (this.devicePingInterval) {
@@ -39,7 +54,7 @@ export class Analytics {
 
   private pingDevices() {
     let deviceString = '';
-    for (const device of this.devices) {
+    for (const device of this.allDevices()) {
       deviceString += device.dev_model + ':' + device.dev_sn + ';';
     }
 
@@ -49,28 +64,29 @@ export class Analytics {
       this.id = hash.digest('base64');
     }
 
-    if (this.enabled && this.id.length > 0) {
+    if (this.posthog && this.id.length > 0) {
       this.ping();
 
-      for (const device of this.devices) {
+      for (const device of this.allDevices()) {
         this.posthog.capture({
           distinctId: this.id,
           event: 'device_registered',
           properties: {
             device: device.dev_model,
             winetVersion: this.winetVersion,
+            winetCount: this.devices.size,
           },
         });
       }
     }
   }
 
-  public registerVersion(version: number) {
-    this.winetVersion = version;
+  public registerVersion(host: string, version: number) {
+    this.winetVersions.set(host, version);
   }
 
   public registerError(type: string, error: string) {
-    if (this.enabled && this.id.length > 0) {
+    if (this.posthog && this.id.length > 0) {
       this.posthog.capture({
         distinctId: this.id,
         event: 'error',
@@ -84,7 +100,7 @@ export class Analytics {
   }
 
   public registerReconnect(type: string) {
-    if (this.enabled && this.id.length > 0) {
+    if (this.posthog && this.id.length > 0) {
       this.posthog.capture({
         distinctId: this.id,
         event: 'reconnect',
@@ -97,12 +113,13 @@ export class Analytics {
   }
 
   public ping() {
-    if (this.enabled && this.id.length > 0) {
+    if (this.posthog && this.id.length > 0) {
       this.posthog.capture({
-        distinctId: this.id || '',
+        distinctId: this.id,
         event: 'ping',
         properties: {
           winetVersion: this.winetVersion,
+          winetCount: this.devices.size,
         },
       });
     }

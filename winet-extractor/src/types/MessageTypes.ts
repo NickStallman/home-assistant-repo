@@ -59,7 +59,8 @@ export const DeviceListSchema = z.object({
 export const DataSchema = z.object({
   data_name: z.string(),
   data_value: z.string(),
-  data_unit: z.string(),
+  // Some devices (e.g. EV chargers) omit the unit on text values
+  data_unit: z.string().optional().default(''),
 });
 
 export const RealtimeSchema = z.object({
@@ -81,3 +82,5 @@ export const DirectSchema = z.object({
   list: z.array(DirectItemSchema),
   count: z.number().int(),
 });
+
+export type Device = z.infer<typeof DeviceSchema>;

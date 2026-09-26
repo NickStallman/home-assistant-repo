@@ -1,5 +1,6 @@
-#/bin/sh
+#!/bin/sh
 
 cd /usr/src/app || exit
 
-npm run cli
+# exec so node receives signals directly, without an extra npm process
+exec node build/src/index.js
