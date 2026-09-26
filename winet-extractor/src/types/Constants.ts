@@ -1,17 +1,5 @@
-const NumericUnits = [
-  'A',
-  '%',
-  'kW',
-  'kWh',
-  '℃',
-  'V',
-  'kvar',
-  'var',
-  'Hz',
-  'kVA',
-  'kΩ',
-  'W',
-];
+// Sensors reported without a unit that are still numeric
+const UnitlessNumericSlugs = ['total_power_factor', 'power_factor'];
 
 enum QueryStages {
   REAL,
@@ -49,4 +37,9 @@ DeviceTypeStages[46] = [QueryStages.REAL];
 DeviceTypeStages[47] = [QueryStages.REAL];
 DeviceTypeStages[48] = [QueryStages.REAL];
 
-export {NumericUnits, DeviceTypeStages, QueryStages};
+// Devices with MPPT inputs, i.e. inverters
+function isInverterType(devType: number): boolean {
+  return (DeviceTypeStages[devType] ?? []).includes(QueryStages.DIRECT);
+}
+
+export {UnitlessNumericSlugs, DeviceTypeStages, QueryStages, isInverterType};

@@ -1,12 +1,19 @@
-import {getProperties} from './getProperties';
 import {winetHandler} from './winetHandler';
-import {MqttPublisher} from './homeassistant';
-import {isTextStatus, isNumericStatus} from './types/DeviceStatus';
+import {MqttPublisher, hostSlug} from './homeassistant';
+import {DeviceStatusMap} from './types/DeviceStatus';
+import {Device} from './types/MessageTypes';
+import {DeviceInfo} from './types/HaTypes';
+import {isInverterType} from './types/Constants';
+import {loadConfig} from './config';
+import {
+  SiteTotals,
+  SiteDevice,
+  SITE_DEVICE_SLUG,
+  SiteSlugsWithoutStateClass,
+} from './siteTotals';
 import Winston from 'winston';
-import fs from 'fs';
 import util from 'util';
 import {Analytics} from './analytics';
-const dotenv = require('dotenv');
 
 const logger = Winston.createLogger({
   level: 'info',
@@ -15,9 +22,9 @@ const logger = Winston.createLogger({
       format: 'YYYY-MM-DD HH:mm:ss',
     }),
     Winston.format.printf(info => {
-      const {timestamp, level, message, ...extraData} = info;
+      const {timestamp, level, message, host, ...extraData} = info;
       return (
-        `${timestamp} ${level}: ${message} ` +
+        `${timestamp} ${level}: ${host ? `[${host}] ` : ''}${message} ` +
         `${Object.keys(extraData).length ? util.format(extraData) : ''}`
       );
     })
@@ -25,131 +32,183 @@ const logger = Winston.createLogger({
   transports: [new Winston.transports.Console()],
 });
 
-let options = {
-  winet_host: '',
-  mqtt_url: '',
-  mqtt_prefix: '',
-  winet_user: '',
-  winet_pass: '',
-  poll_interval: '10',
-  analytics: true,
-  ssl: false,
-};
-
-// Check if the file exists
-if (fs.existsSync('/data/options.json')) {
-  const rawOptions = fs.readFileSync('/data/options.json', 'utf8');
-  options = JSON.parse(rawOptions);
-} else {
-  dotenv.config();
-
-  options.winet_host = process.env.WINET_HOST || '';
-  options.mqtt_url = process.env.MQTT_URL || '';
-  options.mqtt_prefix = process.env.MQTT_PREFIX || 'homeassistant';
-  options.winet_user = process.env.WINET_USER || '';
-  options.winet_pass = process.env.WINET_PASS || '';
-  options.poll_interval = process.env.POLL_INTERVAL || '10';
-  options.analytics = process.env.ANALYTICS === 'true';
-  options.ssl = process.env.SSL === 'true';
-}
-
-if (!options.winet_host) {
-  console.log(process.env);
-  throw new Error('No host provided');
-}
-
-if (!options.mqtt_url) {
-  throw new Error('No mqtt provided');
-}
+const config = loadConfig();
 
 const lang = 'en_US';
-const frequency = parseInt(options.poll_interval) || 10;
+const frequency = config.pollInterval;
 
-const mqtt = new MqttPublisher(logger, options.mqtt_url, options.mqtt_prefix);
-const winet = new winetHandler(
-  logger,
-  options.winet_host,
-  lang,
-  frequency,
-  options.winet_user || '',
-  options.winet_pass || '',
-  new Analytics(options.analytics || true)
+logger.info(
+  `Starting with ${config.winets.length} WiNet(s): ` +
+    config.winets.map(w => w.host).join(', ')
 );
 
-const configuredSensors: string[] = [];
-const configuredDevices: number[] = [];
+const instanceId = hostSlug(config.winets[0].host);
+const mqtt = new MqttPublisher(
+  logger,
+  config.mqttUrl,
+  config.mqttPrefix,
+  instanceId
+);
+const analytics = new Analytics(config.analytics);
+const siteTotals = new SiteTotals(Math.max(frequency * 1000 * 6, 60000));
 
-winet.setCallback((devices, deviceStatus) => {
+// Sensors are keyed by device slug (model + serial) which is unique across
+// WiNets. dev_id is only unique within a single WiNet.
+const configuredSensors = new Set<string>();
+const configuredDevices = new Set<string>();
+const deviceOwners = new Map<string, string>();
+const inverterStatus = new Map<string, DeviceStatusMap>();
+const reportedHosts = new Set<string>();
+
+const deviceInfo = (device: Device): DeviceInfo => ({
+  name: `${device.dev_model} ${device.dev_sn}`,
+  identifiers: [`${device.dev_model}_${device.dev_sn}`],
+  model: device.dev_model,
+  manufacturer: 'Sungrow',
+  serial_number: device.dev_sn,
+});
+
+function publishSiteTotals(): number {
+  // Wait until every WiNet has reported, otherwise the lifetime totals would
+  // jump when a late WiNet joins
+  if (
+    !config.siteTotals ||
+    inverterStatus.size < 2 ||
+    reportedHosts.size < config.winets.length
+  ) {
+    return 0;
+  }
+
+  let updated = 0;
+  for (const status of siteTotals.update(inverterStatus)) {
+    const key = `${SITE_DEVICE_SLUG}/${status.slug}`;
+    if (!configuredSensors.has(key)) {
+      if (
+        !mqtt.publishConfig(
+          SITE_DEVICE_SLUG,
+          status,
+          SiteDevice,
+          undefined,
+          SiteSlugsWithoutStateClass.includes(status.slug)
+        )
+      ) {
+        continue;
+      }
+      logger.info(`Configured site sensor: ${status.slug}`);
+      configuredSensors.add(key);
+    }
+    if (mqtt.publishState(SITE_DEVICE_SLUG, status)) {
+      status.dirty = false;
+      updated++;
+    }
+  }
+  return updated;
+}
+
+function onStatus(
+  handler: winetHandler,
+  handlerLogger: Winston.Logger,
+  devices: Device[],
+  deviceStatus: Record<string, DeviceStatusMap>
+) {
   let updatedSensorsConfig = 0;
   let updatedSensors = 0;
 
   for (const device of devices) {
     const deviceSlug = `${device.dev_model}_${device.dev_sn}`;
-    const currentStatus = deviceStatus[device.dev_id];
+    const currentStatus = deviceStatus[device.dev_sn] ?? {};
 
-    if (!configuredDevices.includes(device.dev_id)) {
-      if (mqtt.registerDevice(deviceSlug, device)) {
-        logger.info(`Registered device: ${deviceSlug}`);
-        configuredDevices.push(device.dev_id);
-      }
+    const owner = deviceOwners.get(deviceSlug);
+    if (owner === undefined) {
+      deviceOwners.set(deviceSlug, handler.host);
+    } else if (owner !== handler.host) {
+      handlerLogger.warn(
+        `Device ${deviceSlug} is also reported by ${owner}, ignoring duplicate`
+      );
+      continue;
     }
 
-    for (const statusKey in currentStatus) {
-      const status = currentStatus[statusKey];
-      const combinedSlug = `${deviceSlug}_${status.slug}`;
+    if (!configuredDevices.has(deviceSlug) && mqtt.isConnected()) {
+      mqtt.removeLegacyDeviceConfig(deviceSlug);
+      handlerLogger.info(`Registered device: ${deviceSlug}`);
+      configuredDevices.add(deviceSlug);
+    }
 
-      if (!configuredSensors.includes(combinedSlug)) {
+    if (isInverterType(device.dev_type)) {
+      inverterStatus.set(deviceSlug, currentStatus);
+    }
+
+    for (const status of Object.values(currentStatus)) {
+      const key = `${deviceSlug}/${status.slug}`;
+
+      if (!configuredSensors.has(key) && status.value !== undefined) {
         if (
-          status.value !== undefined &&
-          mqtt.publishConfig(deviceSlug, status, device)
+          mqtt.publishConfig(
+            deviceSlug,
+            status,
+            deviceInfo(device),
+            handler.host
+          )
         ) {
-          logger.info(`Configured sensor: ${deviceSlug} ${status.slug}`);
-          configuredSensors.push(combinedSlug);
+          handlerLogger.info(`Configured sensor: ${deviceSlug} ${status.slug}`);
+          configuredSensors.add(key);
           updatedSensorsConfig++;
-        } else {
-          logger.debug(`Invalid sensor state: ${deviceSlug} ${status.slug}`);
         }
       }
 
-      if (status.dirty) {
-        if (isNumericStatus(status)) {
-          mqtt.publishNumeric(
-            deviceSlug,
-            status.slug,
-            status.unit,
-            status.value
-          );
-        } else if (isTextStatus(status)) {
-          mqtt.publishText(deviceSlug, status.slug, status.value);
+      if (status.dirty && configuredSensors.has(key)) {
+        if (status.value === undefined) {
+          // Nothing to publish, e.g. unused backup port phases
+          status.dirty = false;
+        } else if (mqtt.publishState(deviceSlug, status)) {
+          status.dirty = false;
+          updatedSensors++;
         }
-        status.dirty = false;
-        updatedSensors++;
       }
     }
   }
+
+  reportedHosts.add(handler.host);
+  publishSiteTotals();
 
   if (updatedSensorsConfig > 0) {
-    logger.info(`Configured ${updatedSensorsConfig} sensors`);
+    handlerLogger.info(`Configured ${updatedSensorsConfig} sensors`);
   }
   if (updatedSensors > 0) {
-    logger.info(`Updated ${updatedSensors} sensors`);
+    handlerLogger.info(`Updated ${updatedSensors} sensors`);
   }
-});
-
-function startWithRetry(retryDelay = 10000) {
-  getProperties(logger, options.winet_host, lang, options.ssl)
-    .then(result => {
-      logger.info('Fetched i18n properties.');
-
-      winet.setProperties(result.properties);
-      winet.connect(result.forceSsl);
-    })
-    .catch(err => {
-      logger.error('Failed to fetch i18n properties:', err.message);
-      const nextDelay = Math.min(retryDelay * 1.5, 60000);
-      logger.warn(`Device unreachable. Retrying in ${Math.round(retryDelay / 1000)}s...`);
-      setTimeout(() => startWithRetry(nextDelay), retryDelay);
-    });
 }
 
-startWithRetry();
+for (const winet of config.winets) {
+  const handlerLogger = logger.child({host: winet.host});
+  const handler = new winetHandler(
+    handlerLogger,
+    winet.host,
+    lang,
+    frequency,
+    winet.user,
+    winet.pass,
+    winet.ssl,
+    analytics
+  );
+
+  handler.setCallback((h, devices, deviceStatus) =>
+    onStatus(h, handlerLogger, devices, deviceStatus)
+  );
+  handler.setConnectionCallback((h, connected) => {
+    mqtt.setAvailability(h.host, connected);
+  });
+  handler.start();
+}
+
+for (const signal of ['SIGTERM', 'SIGINT']) {
+  process.on(signal, () => {
+    logger.info(`Received ${signal}, shutting down`);
+    // Websockets and timers keep the event loop alive, so exit explicitly.
+    // Don't hang around if the broker is unresponsive.
+    // eslint-disable-next-line n/no-process-exit
+    setTimeout(() => process.exit(0), 3000).unref();
+    // eslint-disable-next-line n/no-process-exit
+    mqtt.shutdown().then(() => process.exit(0));
+  });
+}

@@ -3,16 +3,23 @@ export type DeviceStatus = {
   slug: string;
   value: string | number | undefined;
   unit: string;
+  // Numeric sensors are published with a float template and a unit
+  numeric: boolean;
+  // Value needs to be published to MQTT
   dirty: boolean;
+  // Last time a reading was received from the WiNet (ms)
+  seenAt: number;
+  // Last time the value was marked dirty (ms)
+  changedAt: number;
 };
 
 export type TextStatus = DeviceStatus & {
-  unit: '';
+  numeric: false;
   value: string | undefined;
 };
 
 export type NumericStatus = DeviceStatus & {
-  unit: string;
+  numeric: true;
   value: number;
 };
 
@@ -21,9 +28,9 @@ export type DeviceStatusMap = {
 };
 
 export function isTextStatus(status: DeviceStatus): status is TextStatus {
-  return status.unit === '';
+  return !status.numeric;
 }
 
 export function isNumericStatus(status: DeviceStatus): status is NumericStatus {
-  return status.unit !== '' && typeof status.value === 'number';
+  return status.numeric && typeof status.value === 'number';
 }

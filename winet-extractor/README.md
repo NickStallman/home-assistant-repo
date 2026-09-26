@@ -18,7 +18,7 @@ This list is the confirmed working with the following hardware.
 
 - Sungrow SH50RS/SH80RS/SH10RS - Single Phase Hybrid Inverters
 - Sungrow SH10RT/SH15T - Three Phase Hybrid Inverters
-- Sungrow SG80RS/SG10RS - Single Phase String Inverters
+- Sungrow SG5.0RS/SG80RS/SG10RS - Single Phase String Inverters
 - Sungrow SG80RT/SG10RT - Three Phase String Inverters
 
 ### Batteries
@@ -46,11 +46,47 @@ You will also have to have your MQTT broker configured and know your credentials
 
 4. Start the addon, and observe your detected devices in the addon log or via Integrations -> MQTT
 
+### Multiple inverters / multiple WiNets
+
+Inverters and batteries connected to the same WiNet are detected automatically.
+
+If you have more than one WiNet (e.g. a hybrid inverter plus a separate string inverter, each with its own dongle), list them all in **Winet Host**, separated by commas:
+
+```yaml
+winet_host: 192.168.1.100, 192.168.1.101
+```
+
+Every WiNet uses the same username, password and SSL setting. If a WiNet needs different credentials, add it under **Additional WiNets** instead. Any field you leave out falls back to the main settings:
+
+```yaml
+additional_winets:
+  - host: 192.168.1.102
+    user: admin
+    pass: my-other-password
+    ssl: true
+```
+
+Each device keeps its own entities (`sensor.<model>_<serial>_<sensor>`), so adding a WiNet never renames existing entities. The addon log prefixes each line with the WiNet it relates to, e.g. `[192.168.1.101]`.
+
+#### Site totals
+
+With two or more inverters the addon also publishes a **WiNet Site** device, which adds the inverters together:
+
+| Entity | Sum of |
+|--------|--------|
+| `sensor.winet_site_pv_power` | `mppt_total_power` (W) |
+| `sensor.winet_site_total_dc_power` | `total_dc_power` (kW) |
+| `sensor.winet_site_total_active_power` | `total_active_power` (kW) |
+| `sensor.winet_site_daily_pv_yield` | `daily_pv_yield` / `daily_yield` (kWh) |
+| `sensor.winet_site_total_pv_yield` | `total_pv_yield` / `total_yield` (kWh) |
+
+For the Energy dashboard's solar production, use `sensor.winet_site_total_pv_yield`. The daily sum is for display only, because each inverter resets at a slightly different time around midnight. Turn this off with the **Site totals** option.
+
 ### Useful Entities
 
 These entities may be slightly different depending on your inverter, as the names of entities are pulled from the inverter.
 
-#### Energy Dashbard
+#### Energy Dashboard
 
 These are cumulative energy values measured in kwh, which are useful for Home Assistant's Energy Dashboard
 
@@ -106,7 +142,7 @@ sensor:
 
 This addon can be run as a normal docker container, rather than as a Home Assistant Addon.
 
-First clone the repository and copy `.env.example` to `.env` then fill in the configuration parameters.
+First clone the repository and copy `.env.example` to `.env` then fill in the configuration parameters. For multiple WiNets, set `WINET_HOST` to a comma-separated list.
 
 Then run `./docker-compose-up.sh`. This is equivelant to `docker compose up` except it detects the correct architecture to build the image from.
 
