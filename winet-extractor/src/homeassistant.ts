@@ -125,12 +125,9 @@ export class MqttPublisher {
 
     const configTopic = `${this.prefix}/sensor/${deviceSlug}/${slug}/config`;
     const isTextSensor = isTextStatus(deviceStatus);
-    const isNumeric = (n: number) => !isNaN(n) && isFinite(n);
-    const valueTemplate = isNumeric(
-      parseFloat(deviceStatus.value?.toString() || '')
-    )
-      ? '{{ value_json.value | float }}'
-      : '{{ value_json.value }}';
+    const valueTemplate = isTextSensor
+      ? '{{ value_json.value }}'
+      : '{{ value_json.value | float }}';
     const identifier = `${device.dev_model}_${device.dev_sn}`;
     const configPayload: ConfigPayload = {
       name: deviceStatus.name.trim(),

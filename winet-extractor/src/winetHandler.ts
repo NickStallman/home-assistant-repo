@@ -357,13 +357,14 @@ export class winetHandler {
           const dataPoint: DeviceStatus = {
             name: name,
             slug: slugify(name, {lower: true, strict: true, replacement: '_'}),
-            value: NumericUnits.includes(data.data_unit)
-              ? data.data_value === '--'
+            value:
+              data.data_value === '--'
                 ? undefined
-                : parseFloat(data.data_value)
-              : data.data_value.startsWith('I18N_')
-                ? this.properties[data.data_value]
-                : data.data_value,
+                : NumericUnits.includes(data.data_unit)
+                  ? parseFloat(data.data_value)
+                  : data.data_value.startsWith('I18N_')
+                    ? this.properties[data.data_value]
+                    : data.data_value,
             unit: data.data_unit,
             dirty: true,
           };
