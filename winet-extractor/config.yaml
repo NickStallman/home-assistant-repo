@@ -5,12 +5,8 @@ stage: 'stable'
 slug: 'winet-extractor'
 url: 'https://github.com/NickStallman/home-assistant-repo/tree/main/winet-extractor'
 arch:
-  - armhf
-  - armv7
   - aarch64
   - amd64
-map:
-  - config:rw
 panel_icon: mdi:solar-power
 auth_api: false
 hassio_role: 'default'
