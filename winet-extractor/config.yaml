@@ -1,16 +1,12 @@
 name: 'WiNet Extractor'
 description: 'Extracts data from WiNet devices and sends to Home Assistant over MQTT.'
-version: '0.3.0'
+version: '0.4.0'
 stage: 'stable'
 slug: 'winet-extractor'
 url: 'https://github.com/NickStallman/home-assistant-repo/tree/main/winet-extractor'
 arch:
-  - armhf
-  - armv7
   - aarch64
   - amd64
-map:
-  - config:rw
 panel_icon: mdi:solar-power
 auth_api: false
 hassio_role: 'default'

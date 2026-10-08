@@ -1,12 +1,9 @@
-ARG BUILD_FROM
-FROM $BUILD_FROM
+# Multi-arch image (amd64, aarch64). BUILD_FROM only needs to be passed to
+# build from a different base, e.g. standalone on a 32-bit system.
+ARG BUILD_FROM=ghcr.io/home-assistant/base:3.22
+FROM ${BUILD_FROM}
 
 USER root
-
-LABEL \
-  io.hass.version="VERSION" \
-  io.hass.type="addon" \
-  io.hass.arch="armhf|aarch64|i386|amd64"
 
 # Create app directory
 WORKDIR /usr/src/app

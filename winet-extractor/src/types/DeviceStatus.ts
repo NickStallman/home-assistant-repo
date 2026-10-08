@@ -5,6 +5,8 @@ export type DeviceStatus = {
   unit: string;
   // Numeric sensors are published with a float template and a unit
   numeric: boolean;
+  // Decimals to show in Home Assistant, when the default would hide detail
+  precision?: number;
   // Value needs to be published to MQTT
   dirty: boolean;
   // Last time a reading was received from the WiNet (ms)

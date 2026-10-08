@@ -69,4 +69,5 @@ export interface ConfigPayload {
   unit_of_measurement?: string;
   state_class?: string;
   device_class?: string;
+  suggested_display_precision?: number;
 }

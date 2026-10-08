@@ -19,6 +19,13 @@ import {
 import {getProperties} from './getProperties';
 import Winston from 'winston';
 import {Analytics} from './analytics';
+import {
+  RegisterBlock,
+  decodeBlock,
+  readRegisters,
+  MAX_REGISTER_COUNT,
+} from './registers';
+import {RegisterBlocks} from './types/RegisterBlocks';
 
 // Values are republished at least this often even when unchanged
 const REFRESH_INTERVAL = 300000;
@@ -29,6 +36,11 @@ export type StatusCallback = (
   devices: Device[],
   deviceStatus: Record<string, DeviceStatusMap>
 ) => void;
+
+type RegisterPoll = {
+  device: Device;
+  block: RegisterBlock;
+};
 
 export type ConnectionCallback = (
   handler: winetHandler,
@@ -63,6 +75,10 @@ export class winetHandler {
   private lastData: number | undefined = undefined;
   private winetVersion: number | undefined = undefined;
   private connected = false;
+
+  // Register blocks are read over HTTP, keyed by "<block id>:<serial>"
+  private blockLastRead = new Map<string, number>();
+  private blockFailed = new Set<string>();
 
   private reconnectAttempts = 0;
   private reconnectTimer: NodeJS.Timeout | undefined = undefined;
@@ -158,6 +174,7 @@ export class winetHandler {
     this.stallCount = 0;
     this.winetVersion = undefined;
     this.lastData = Date.now();
+    this.blockLastRead.clear();
 
     this.watchdogInterval = setInterval(() => {
       if (
@@ -590,7 +607,10 @@ export class winetHandler {
 
   private updateDeviceStatus(
     devId: number,
-    reading: Pick<DeviceStatus, 'name' | 'slug' | 'value' | 'unit' | 'numeric'>
+    reading: Pick<
+      DeviceStatus,
+      'name' | 'slug' | 'value' | 'unit' | 'numeric' | 'precision'
+    >
   ) {
     const device = this.devices.find(d => d.dev_id === devId);
     if (device === undefined) return;
@@ -614,6 +634,73 @@ export class winetHandler {
       seenAt: now,
       changedAt: now,
     };
+  }
+
+  private dueRegisterPolls(): RegisterPoll[] {
+    const now = Date.now();
+    const polls: RegisterPoll[] = [];
+
+    for (const device of this.devices) {
+      for (const block of RegisterBlocks) {
+        if (
+          !block.devTypes.includes(device.dev_type) ||
+          block.count > MAX_REGISTER_COUNT
+        ) {
+          continue;
+        }
+        const lastRead = this.blockLastRead.get(`${block.id}:${device.dev_sn}`);
+        if (lastRead === undefined || now - lastRead >= block.interval) {
+          polls.push({device, block});
+        }
+      }
+    }
+    return polls;
+  }
+
+  private async pollRegisterBlocks(polls: RegisterPoll[]): Promise<void> {
+    const ws = this.ws;
+
+    for (const {device, block} of polls) {
+      const key = `${block.id}:${device.dev_sn}`;
+      // A failed read is retried at the next interval, not every scan
+      this.blockLastRead.set(key, Date.now());
+
+      let registers: number[];
+      try {
+        registers = await readRegisters(
+          {host: this.host, ssl: this.ssl, lang: this.lang, token: this.token},
+          device,
+          block
+        );
+      } catch (err) {
+        // Reconnected while waiting, the scan has been restarted
+        if (this.ws !== ws) return;
+        if (!this.blockFailed.has(key)) {
+          this.blockFailed.add(key);
+          this.analytics.registerError('registerBlock', block.id);
+          this.logger.warn(
+            `Failed to read ${block.id} registers for ` +
+              `${device.dev_model} (${device.dev_sn}): ` +
+              `${err instanceof Error ? err.message : err}`
+          );
+        }
+        continue;
+      }
+
+      if (this.ws !== ws) return;
+      this.lastData = Date.now();
+
+      if (this.blockFailed.delete(key)) {
+        this.logger.info(
+          `Reading ${block.id} registers for ` +
+            `${device.dev_model} (${device.dev_sn}) again`
+        );
+      }
+
+      for (const reading of decodeBlock(block, registers)) {
+        this.updateDeviceStatus(device.dev_id, {...reading, numeric: true});
+      }
+    }
   }
 
   private scanDevices() {
@@ -644,8 +731,24 @@ export class winetHandler {
       );
       const nextIndex = currentIndex + 1;
       if (currentIndex === -1 || nextIndex >= this.devices.length) {
-        this.currentDevice = undefined;
-        this.callbackUpdatedStatus?.(this, this.devices, this.deviceStatus);
+        const finishCycle = () => {
+          this.currentDevice = undefined;
+          this.callbackUpdatedStatus?.(this, this.devices, this.deviceStatus);
+        };
+
+        // currentDevice stays set while the registers are read, so the scan
+        // timer doesn't start a websocket query alongside the HTTP requests
+        const polls = this.dueRegisterPolls();
+        if (polls.length === 0) {
+          finishCycle();
+        } else {
+          const ws = this.ws;
+          this.pollRegisterBlocks(polls).finally(() => {
+            if (this.ws === ws) {
+              finishCycle();
+            }
+          });
+        }
         return;
       }
       this.currentDevice = this.devices[nextIndex].dev_id;

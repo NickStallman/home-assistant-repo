@@ -1,3 +1,12 @@
+### 0.4.0
+
+- **Battery cell voltages and module temperatures.** SBR battery stacks now report the highest and lowest cell voltage (and which module and cell it is), the spread between them, the highest and lowest cell voltage of every module, and the highest and lowest module temperature. Every stack the WiNet lists gets its own set
+- These values are read from the WiNet over HTTP every 5 minutes rather than with the live data, so they update less often than the other sensors
+- Added a general way to read extra device registers through the WiNet, so more values can be added later
+- Fixed the Supervisor warnings about a deprecated `config` folder mapping, deprecated `armhf`/`armv7` architectures and `build.yaml` (#88). The addon never used the Home Assistant config folder, so it is no longer mounted
+- 32-bit Home Assistant installs (`armhf`, `armv7`) are no longer offered new versions, as Home Assistant itself has dropped them. Standalone Docker on 32-bit systems still builds from the last available base image
+- The addon is now built on Alpine 3.22 (Node.js 22)
+
 ### 0.3.0
 
 - **Multiple WiNet support.** Enter several hosts in `winet_host` separated by commas (they share the username/password), or add WiNets with their own credentials under `additional_winets`. Existing configurations keep working unchanged and no entities are renamed (#9)
