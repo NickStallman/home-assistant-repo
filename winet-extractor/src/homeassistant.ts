@@ -200,9 +200,12 @@ export class MqttPublisher {
       name: status.name.trim(),
       state_topic: this.stateTopic(deviceSlug, slug),
       unique_id: `${deviceSlug}_${slug}`.toLowerCase(),
-      value_template: status.numeric
-        ? '{{ value_json.value | float }}'
-        : '{{ value_json.value }}',
+      value_template: !status.numeric
+        ? '{{ value_json.value }}'
+        : status.precision === 0
+          ? // Whole numbers, e.g. a module number, would show as "6.0"
+            '{{ value_json.value | int }}'
+          : '{{ value_json.value | float }}',
       device,
       availability: [{topic: this.statusTopic}],
     };
