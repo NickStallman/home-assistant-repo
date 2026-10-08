@@ -1,3 +1,9 @@
+### 0.4.0
+
+- **Battery cell voltages and module temperatures.** SBR battery stacks now report the highest and lowest cell voltage (and which module and cell it is), the spread between them, the highest and lowest cell voltage of every module, and the highest and lowest module temperature. Every stack the WiNet lists gets its own set
+- These values are read from the WiNet over HTTP every 5 minutes rather than with the live data, so they update less often than the other sensors
+- Added a general way to read extra device registers through the WiNet, so more values can be added later
+
 ### 0.3.0
 
 - **Multiple WiNet support.** Enter several hosts in `winet_host` separated by commas (they share the username/password), or add WiNets with their own credentials under `additional_winets`. Existing configurations keep working unchanged and no entities are renamed (#9)

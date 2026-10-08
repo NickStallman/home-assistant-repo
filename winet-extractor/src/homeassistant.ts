@@ -237,6 +237,9 @@ export class MqttPublisher {
       if (slug.endsWith('power_factor') && unit === '') {
         configPayload.device_class = 'power_factor';
       }
+      if (status.precision !== undefined) {
+        configPayload.suggested_display_precision = status.precision;
+      }
     }
 
     const payload = JSON.stringify(configPayload);

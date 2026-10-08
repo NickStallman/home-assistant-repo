@@ -106,6 +106,16 @@ These are live values measured in kw.
 - Grid Consumption: purchased_power
 - Return to grid: total_export_active_power
 
+#### Battery cell voltages
+
+SBR battery stacks also report cell level detail. These are read every 5 minutes, so they update less often than the live values. Every stack gets its own set.
+
+- Highest and lowest cell in the stack: cell_voltage_max / cell_voltage_min
+- Difference between them: cell_voltage_spread
+- Where they are: cell_voltage_max_module / cell_voltage_max_cell / cell_voltage_min_module / cell_voltage_min_cell
+- Highest and lowest cell of each module: module_1_cell_voltage_max / module_1_cell_voltage_min, and so on for every module in the stack
+- Module temperatures: module_temperature_max / module_temperature_min, with module_temperature_max_module / module_temperature_min_module
+
 ### Optional additional sensors
 
 In order to expose the MPPT inputs to the Energy dashboard you need to integrate them to energy.
