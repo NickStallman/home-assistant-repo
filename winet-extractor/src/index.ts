@@ -14,6 +14,7 @@ import {
 import Winston from 'winston';
 import util from 'util';
 import {Analytics} from './analytics';
+import {getVersion} from './version';
 
 const logger = Winston.createLogger({
   level: 'info',
@@ -37,8 +38,10 @@ const config = loadConfig();
 const lang = 'en_US';
 const frequency = config.pollInterval;
 
+const version = getVersion();
+
 logger.info(
-  `Starting with ${config.winets.length} WiNet(s): ` +
+  `WiNet Extractor ${version} starting with ${config.winets.length} WiNet(s): ` +
     config.winets.map(w => w.host).join(', ')
 );
 
@@ -49,7 +52,7 @@ const mqtt = new MqttPublisher(
   config.mqttPrefix,
   instanceId
 );
-const analytics = new Analytics(config.analytics);
+const analytics = new Analytics(config.analytics, version);
 const siteTotals = new SiteTotals(Math.max(frequency * 1000 * 6, 60000));
 
 // Sensors are keyed by device slug (model + serial) which is unique across

@@ -5,14 +5,16 @@ import {Device} from './types/MessageTypes';
 export class Analytics {
   private id = '';
   private enabled: boolean;
+  private version: string;
   private posthog: PostHog | undefined;
   // Keyed by WiNet host so multiple dongles don't overwrite each other
   private winetVersions = new Map<string, number>();
   private devices = new Map<string, Device[]>();
   private devicePingInterval: NodeJS.Timeout | undefined = undefined;
 
-  constructor(enabled: boolean) {
+  constructor(enabled: boolean, version: string) {
     this.enabled = enabled;
+    this.version = version;
 
     if (this.enabled) {
       this.posthog = new PostHog(
@@ -73,6 +75,7 @@ export class Analytics {
           event: 'device_registered',
           properties: {
             device: device.dev_model,
+            version: this.version,
             winetVersion: this.winetVersion,
             winetCount: this.devices.size,
           },
@@ -93,6 +96,46 @@ export class Analytics {
         properties: {
           type: type,
           error: error,
+          version: this.version,
+          winetVersion: this.winetVersion,
+        },
+      });
+    }
+  }
+
+  // Outcome of a register block for one device: sent once when it first reads
+  // successfully, and once if it gets disabled
+  public registerBlockResult(
+    block: string,
+    device: string,
+    failure?: {reason: string; detail: string}
+  ) {
+    if (!this.posthog || this.id.length === 0) {
+      return;
+    }
+    if (failure === undefined) {
+      this.posthog.capture({
+        distinctId: this.id,
+        event: 'register_block',
+        properties: {
+          status: 'ok',
+          block,
+          device,
+          version: this.version,
+          winetVersion: this.winetVersion,
+        },
+      });
+    } else {
+      this.posthog.capture({
+        distinctId: this.id,
+        event: 'error',
+        properties: {
+          type: 'registerBlock',
+          error: failure.reason,
+          detail: failure.detail.slice(0, 200),
+          block,
+          device,
+          version: this.version,
           winetVersion: this.winetVersion,
         },
       });
@@ -106,6 +149,7 @@ export class Analytics {
         event: 'reconnect',
         properties: {
           type: type,
+          version: this.version,
           winetVersion: this.winetVersion,
         },
       });
@@ -118,6 +162,7 @@ export class Analytics {
         distinctId: this.id,
         event: 'ping',
         properties: {
+          version: this.version,
           winetVersion: this.winetVersion,
           winetCount: this.devices.size,
         },

@@ -70,6 +70,7 @@ for (let module = 1; module <= SBR_MAX_MODULES; module++) {
 // Registers 10757-10780 of an SBR battery stack
 const SbrCells: RegisterBlock = {
   id: 'sbr_cells',
+  label: 'Battery cell readings',
   devTypes: [44],
   type: 'input',
   addr: 10757,
@@ -108,6 +109,22 @@ const SbrCells: RegisterBlock = {
     ),
     ...sbrModuleFields,
   ],
+  // Other battery models may report as the same device type with a different
+  // register layout, which would decode to nonsense
+  validate: values => {
+    const max = values.get('cell_voltage_max');
+    const min = values.get('cell_voltage_min');
+    if (max === undefined || min === undefined) {
+      return 'the battery returned no cell voltages';
+    }
+    if (min < 1.5 || max > 4.5 || min > max) {
+      return (
+        `the values don't look like cell voltages (max ${max} V, ` +
+        `min ${min} V), this battery may use a different register layout`
+      );
+    }
+    return undefined;
+  },
   derive: values => {
     const max = values.get('cell_voltage_max');
     const min = values.get('cell_voltage_min');

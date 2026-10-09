@@ -1,3 +1,11 @@
+### 0.4.1
+
+- Fixed battery cell reads failing every other time on some WiNets ("socket hang up"). The addon reused a connection the WiNet had already closed, it now opens a new one for each read
+- A failed battery cell read no longer causes reconnects. If the WiNet refuses the read or returns something unusable for a battery, the cell sensors for that battery are turned off until the addon restarts and the log says why. A network glitch is retried at the next reading and turns them off after three in a row. The other sensors are not affected
+- Reconnecting no longer triggers an extra battery read, and a slow read can no longer trip the "no data received" watchdog
+- Cell readings that don't look like cell voltages are not published, in case a battery model uses a different layout
+- The addon version is shown in the log at startup and included in the anonymous analytics, along with the reason when a battery read fails
+
 ### 0.4.0
 
 - **Battery cell voltages and module temperatures.** SBR battery stacks now report the highest and lowest cell voltage (and which module and cell it is), the spread between them, the highest and lowest cell voltage of every module, and the highest and lowest module temperature. Every stack the WiNet lists gets its own set
