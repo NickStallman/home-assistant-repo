@@ -39,8 +39,10 @@ export type Reading = {
 };
 
 export type RegisterBlock = {
-  // Used in logs
+  // Used in analytics
   id: string;
+  // What the block provides, as shown to the user in the log
+  label: string;
   // WiNet dev_type values the block applies to
   devTypes: number[];
   type: 'input' | 'holding';
@@ -52,7 +54,22 @@ export type RegisterBlock = {
   fields: RegisterField[];
   // Sensors computed from the decoded fields, keyed by slug
   derive?: (values: Map<string, number>) => Reading[];
+  // Sanity check on the decoded fields. Returns what is wrong, or undefined
+  // when the values look like what the block describes.
+  validate?: (values: Map<string, number>) => string | undefined;
 };
+
+// A register read that didn't produce usable values. `reason` is a short code
+// for analytics, `message` says what happened in plain words.
+export class RegisterReadError extends Error {
+  public readonly reason: string;
+
+  constructor(reason: string, message: string) {
+    super(message);
+    this.name = 'RegisterReadError';
+    this.reason = reason;
+  }
+}
 
 export type RegisterConnection = {
   host: string;
@@ -63,6 +80,12 @@ export type RegisterConnection = {
 
 // The WiNet reads at most this many registers per request
 export const MAX_REGISTER_COUNT = 120;
+
+// Failures that can be a passing network glitch rather than the WiNet or the
+// device being unable to serve the read
+export function isTransientReadFailure(reason: string): boolean {
+  return reason === 'timeout' || reason.startsWith('network:');
+}
 
 const ParamSchema = z.object({
   result_code: z.number(),
@@ -89,7 +112,9 @@ export function readRegisters(
   block: Pick<RegisterBlock, 'addr' | 'count' | 'type'>,
   timeoutMs = 10000
 ): Promise<number[]> {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve, rejectWith) => {
+    const reject = (reason: string, message: string) =>
+      rejectWith(new RegisterReadError(reason, message));
     const params: Record<string, string | number> = {
       lang: conn.lang,
       token: conn.token,
@@ -108,8 +133,13 @@ export function readRegisters(
     const url =
       `${conn.ssl ? 'https' : 'http'}://${conn.host}` +
       `/device/getParam?${query}`;
-    // Ignore self-signed certificate error
-    const options = conn.ssl ? {rejectUnauthorized: false} : {};
+    // A new connection for every read. Node keeps connections alive by
+    // default and the WiNet closes them, so a reused one fails with "socket
+    // hang up" on the next read.
+    const options = conn.ssl
+      ? // Ignore self-signed certificate error
+        {agent: false as const, rejectUnauthorized: false}
+      : {agent: false as const};
 
     const request = (conn.ssl ? https : http)
       .get(url, options, res => {
@@ -117,41 +147,73 @@ export function readRegisters(
         res.on('data', chunk => {
           data += chunk;
         });
-        res.on('error', reject);
+        res.on('error', (err: NodeJS.ErrnoException) =>
+          reject(
+            `network:${err.code ?? 'error'}`,
+            `the connection failed while reading the reply (${err.message})`
+          )
+        );
         res.on('end', () => {
+          if (res.statusCode !== 200) {
+            reject(
+              `http:${res.statusCode}`,
+              `the WiNet answered with HTTP ${res.statusCode}`
+            );
+            return;
+          }
           let json: unknown;
           try {
             json = JSON.parse(data);
           } catch (err) {
-            reject(new Error(`unparseable response (HTTP ${res.statusCode})`));
+            reject('bad_json', 'the WiNet reply was not valid JSON');
             return;
           }
           const result = ParamSchema.safeParse(json);
           if (!result.success) {
-            reject(new Error('unexpected response'));
+            reject(
+              'bad_json',
+              'the WiNet reply was not in the expected format'
+            );
             return;
           }
           const {result_code, result_msg, result_data} = result.data;
           if (result_code !== 1 || result_data === undefined) {
-            reject(new Error(`WiNet returned ${result_msg ?? result_code}`));
+            reject(
+              `winet:${result_code}:${result_msg ?? ''}`,
+              'the WiNet refused the read ' +
+                `(code ${result_code}${result_msg ? `, ${result_msg}` : ''})`
+            );
             return;
           }
           const registers = parseParamValue(result_data.param_value);
           if (registers === undefined || registers.length !== block.count) {
             reject(
-              new Error(
-                `expected ${block.count} registers, got ` +
-                  `"${result_data.param_value.trim()}"`
-              )
+              `bad_length:${registers?.length ?? 'unparseable'}`,
+              `expected ${block.count} registers, got ` +
+                `"${result_data.param_value.trim().slice(0, 80)}"`
             );
             return;
           }
           resolve(registers);
         });
       })
-      .on('error', reject);
+      .on('error', (err: NodeJS.ErrnoException) => {
+        if (timedOut) {
+          reject(
+            'timeout',
+            `the WiNet did not answer within ${Math.round(timeoutMs / 1000)}s`
+          );
+        } else {
+          reject(
+            `network:${err.code ?? 'error'}`,
+            `could not reach the WiNet (${err.message})`
+          );
+        }
+      });
 
+    let timedOut = false;
     request.setTimeout(timeoutMs, () => {
+      timedOut = true;
       request.destroy(new Error('request timed out'));
     });
   });
@@ -207,6 +269,11 @@ export function decodeBlock(
       unit: field.unit,
       precision: field.precision,
     });
+  }
+
+  const problem = block.validate?.(values);
+  if (problem !== undefined) {
+    throw new RegisterReadError('implausible', problem);
   }
 
   for (const reading of block.derive?.(values) ?? []) {

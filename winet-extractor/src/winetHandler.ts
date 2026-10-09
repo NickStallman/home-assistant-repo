@@ -21,7 +21,10 @@ import Winston from 'winston';
 import {Analytics} from './analytics';
 import {
   RegisterBlock,
+  RegisterReadError,
+  Reading,
   decodeBlock,
+  isTransientReadFailure,
   readRegisters,
   MAX_REGISTER_COUNT,
 } from './registers';
@@ -30,6 +33,12 @@ import {RegisterBlocks} from './types/RegisterBlocks';
 // Values are republished at least this often even when unchanged
 const REFRESH_INTERVAL = 300000;
 const MAX_RECONNECT_DELAY = 300000;
+// A websocket drop this soon after a register read counts against the read
+const REGISTER_DROP_WINDOW = 15000;
+const REGISTER_DROP_STRIKES = 2;
+// Network glitches in a row before a register block is turned off. A read the
+// WiNet answers with a refusal or with bad data turns it off straight away.
+const REGISTER_TRANSIENT_FAILURES = 3;
 
 export type StatusCallback = (
   handler: winetHandler,
@@ -76,9 +85,18 @@ export class winetHandler {
   private winetVersion: number | undefined = undefined;
   private connected = false;
 
-  // Register blocks are read over HTTP, keyed by "<block id>:<serial>"
+  // Register blocks are read over HTTP, keyed by "<block id>:<serial>". This
+  // state deliberately survives reconnects: a reconnect must not trigger a
+  // read, and a block that failed stays off until the addon restarts.
   private blockLastRead = new Map<string, number>();
-  private blockFailed = new Set<string>();
+  private blockLockout = new Map<string, string>();
+  private blockOk = new Set<string>();
+  private blockTransientFailures = new Map<string, number>();
+  // Websocket drops that directly followed a read, and reads since the last
+  private blockDropStrikes = new Map<string, number>();
+  private blockReadsSinceDrop = new Map<string, number>();
+  private registerPollActive = false;
+  private lastRegisterPoll: {at: number; polls: RegisterPoll[]} | undefined;
 
   private reconnectAttempts = 0;
   private reconnectTimer: NodeJS.Timeout | undefined = undefined;
@@ -174,10 +192,11 @@ export class winetHandler {
     this.stallCount = 0;
     this.winetVersion = undefined;
     this.lastData = Date.now();
-    this.blockLastRead.clear();
 
     this.watchdogInterval = setInterval(() => {
       if (
+        // No websocket traffic is expected while registers are read over HTTP
+        !this.registerPollActive &&
         this.lastData !== undefined &&
         Date.now() - this.lastData > this.frequency * 1000 * 6
       ) {
@@ -214,6 +233,7 @@ export class winetHandler {
       return;
     }
 
+    this.noteDropAfterRegisterPoll();
     this.closeSocket();
     this.clearTimers();
 
@@ -648,7 +668,11 @@ export class winetHandler {
         ) {
           continue;
         }
-        const lastRead = this.blockLastRead.get(`${block.id}:${device.dev_sn}`);
+        const key = `${block.id}:${device.dev_sn}`;
+        if (this.blockLockout.has(key)) {
+          continue;
+        }
+        const lastRead = this.blockLastRead.get(key);
         if (lastRead === undefined || now - lastRead >= block.interval) {
           polls.push({device, block});
         }
@@ -657,48 +681,142 @@ export class winetHandler {
     return polls;
   }
 
+  // Turn a block off for one device until the addon restarts. Retrying a read
+  // the WiNet can't serve only adds load, and on some WiNets disturbs the
+  // websocket session.
+  private lockOutBlock(
+    {device, block}: RegisterPoll,
+    reason: string,
+    message: string
+  ): void {
+    const key = `${block.id}:${device.dev_sn}`;
+    if (this.blockLockout.has(key)) {
+      return;
+    }
+    this.blockLockout.set(key, reason);
+    this.logger.warn(
+      `${block.label} disabled for ${device.dev_model} (${device.dev_sn}) ` +
+        `until the addon restarts: ${message}`
+    );
+    this.analytics.registerBlockResult(block.id, device.dev_model, {
+      reason,
+      detail: message,
+    });
+  }
+
+  // Called whenever the connection is being torn down. A WiNet that drops the
+  // websocket right after serving a read, twice running, loses the read.
+  private noteDropAfterRegisterPoll(): void {
+    const last = this.lastRegisterPoll;
+    this.lastRegisterPoll = undefined;
+    if (
+      last === undefined ||
+      (!this.registerPollActive && Date.now() - last.at > REGISTER_DROP_WINDOW)
+    ) {
+      return;
+    }
+
+    for (const poll of last.polls) {
+      const key = `${poll.block.id}:${poll.device.dev_sn}`;
+      const strikes = (this.blockDropStrikes.get(key) ?? 0) + 1;
+      this.blockDropStrikes.set(key, strikes);
+      this.blockReadsSinceDrop.set(key, 0);
+      if (strikes >= REGISTER_DROP_STRIKES) {
+        this.lockOutBlock(
+          poll,
+          'connection_dropped',
+          'the WiNet dropped the connection after the last ' +
+            `${REGISTER_DROP_STRIKES} reads`
+        );
+      }
+    }
+  }
+
   private async pollRegisterBlocks(polls: RegisterPoll[]): Promise<void> {
     const ws = this.ws;
+    this.registerPollActive = true;
+    this.lastRegisterPoll = {at: Date.now(), polls};
 
-    for (const {device, block} of polls) {
-      const key = `${block.id}:${device.dev_sn}`;
-      // A failed read is retried at the next interval, not every scan
-      this.blockLastRead.set(key, Date.now());
+    try {
+      for (const poll of polls) {
+        const {device, block} = poll;
+        const key = `${block.id}:${device.dev_sn}`;
+        this.blockLastRead.set(key, Date.now());
 
-      let registers: number[];
-      try {
-        registers = await readRegisters(
-          {host: this.host, ssl: this.ssl, lang: this.lang, token: this.token},
-          device,
-          block
-        );
-      } catch (err) {
-        // Reconnected while waiting, the scan has been restarted
-        if (this.ws !== ws) return;
-        if (!this.blockFailed.has(key)) {
-          this.blockFailed.add(key);
-          this.analytics.registerError('registerBlock', block.id);
-          this.logger.warn(
-            `Failed to read ${block.id} registers for ` +
-              `${device.dev_model} (${device.dev_sn}): ` +
-              `${err instanceof Error ? err.message : err}`
-          );
+        // The previous read wasn't followed by a drop, so earlier ones were
+        // a coincidence
+        const readsSinceDrop = this.blockReadsSinceDrop.get(key) ?? 0;
+        if (readsSinceDrop >= 1) {
+          this.blockDropStrikes.delete(key);
         }
-        continue;
+        this.blockReadsSinceDrop.set(key, readsSinceDrop + 1);
+
+        let readings: Reading[];
+        try {
+          const registers = await readRegisters(
+            {
+              host: this.host,
+              ssl: this.ssl,
+              lang: this.lang,
+              token: this.token,
+            },
+            device,
+            block
+          );
+          readings = decodeBlock(block, registers);
+        } catch (err) {
+          // Reconnected while waiting. The drop has been counted, and the
+          // failure may only be a side effect of it.
+          if (this.ws !== ws) return;
+          if (
+            err instanceof RegisterReadError &&
+            isTransientReadFailure(err.reason)
+          ) {
+            const failures = (this.blockTransientFailures.get(key) ?? 0) + 1;
+            this.blockTransientFailures.set(key, failures);
+            if (failures >= REGISTER_TRANSIENT_FAILURES) {
+              this.lockOutBlock(
+                poll,
+                err.reason,
+                `${err.message}, ${failures} times in a row`
+              );
+            } else {
+              this.logger.warn(
+                `${block.label} for ${device.dev_model} (${device.dev_sn}) ` +
+                  `could not be read: ${err.message}. Trying again at the ` +
+                  `next reading (${failures} of ${REGISTER_TRANSIENT_FAILURES})`
+              );
+            }
+          } else if (err instanceof RegisterReadError) {
+            this.lockOutBlock(poll, err.reason, err.message);
+          } else {
+            this.lockOutBlock(
+              poll,
+              'unexpected',
+              err instanceof Error ? err.message : `${err}`
+            );
+          }
+          continue;
+        }
+
+        if (this.ws !== ws) return;
+        this.blockTransientFailures.delete(key);
+
+        if (!this.blockOk.has(key)) {
+          this.blockOk.add(key);
+          this.analytics.registerBlockResult(block.id, device.dev_model);
+        }
+
+        for (const reading of readings) {
+          this.updateDeviceStatus(device.dev_id, {...reading, numeric: true});
+        }
       }
-
-      if (this.ws !== ws) return;
-      this.lastData = Date.now();
-
-      if (this.blockFailed.delete(key)) {
-        this.logger.info(
-          `Reading ${block.id} registers for ` +
-            `${device.dev_model} (${device.dev_sn}) again`
-        );
-      }
-
-      for (const reading of decodeBlock(block, registers)) {
-        this.updateDeviceStatus(device.dev_id, {...reading, numeric: true});
+    } finally {
+      this.registerPollActive = false;
+      if (this.ws === ws) {
+        // Don't let the time spent reading count as websocket silence
+        this.lastData = Date.now();
+        this.lastRegisterPoll = {at: Date.now(), polls};
       }
     }
   }
