@@ -19,6 +19,7 @@ import {
 import {getProperties} from './getProperties';
 import Winston from 'winston';
 import {Analytics} from './analytics';
+import {WinetTls} from './winetTls';
 import {
   RegisterBlock,
   RegisterReadError,
@@ -111,11 +112,12 @@ export class winetHandler {
     winetUser: string,
     winetPass: string,
     ssl: boolean,
-    analytics: Analytics
+    analytics: Analytics,
+    private readonly tlsPolicy = new WinetTls()
   ) {
     this.logger = logger;
     this.host = host;
-    this.ssl = ssl;
+    this.ssl = ssl || tlsPolicy.required;
     this.lang = lang;
     this.frequency = frequency;
     this.winetUser = winetUser || 'admin';
@@ -137,7 +139,7 @@ export class winetHandler {
 
   // Fetch the i18n labels, retrying until the WiNet is reachable, then connect
   public start(retryDelay = 10000): void {
-    getProperties(this.logger, this.host, this.lang, this.ssl)
+    getProperties(this.logger, this.host, this.lang, this.ssl, this.tlsPolicy)
       .then(result => {
         this.logger.info('Fetched i18n properties.');
         this.properties = result.properties;
@@ -212,8 +214,8 @@ export class winetHandler {
 
     const ws = new Websocket(
       url,
-      // Ignore self-signed certificate error
-      this.ssl ? {rejectUnauthorized: false} : {}
+      // Use the same certificate policy as properties and register requests.
+      this.ssl ? {agent: this.tlsPolicy.agent} : {}
     );
     this.ws = ws;
 
@@ -759,6 +761,7 @@ export class winetHandler {
               ssl: this.ssl,
               lang: this.lang,
               token: this.token,
+              tlsPolicy: this.tlsPolicy,
             },
             device,
             block

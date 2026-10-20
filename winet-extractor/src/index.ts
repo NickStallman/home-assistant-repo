@@ -15,6 +15,7 @@ import Winston from 'winston';
 import util from 'util';
 import {Analytics} from './analytics';
 import {getVersion} from './version';
+import {WinetTls} from './winetTls';
 
 const logger = Winston.createLogger({
   level: 'info',
@@ -34,6 +35,11 @@ const logger = Winston.createLogger({
 });
 
 const config = loadConfig();
+// Validate explicit trust before creating any network clients.
+const tlsPolicy = new WinetTls(
+  config.tls.certificateBase64,
+  config.tls.serverName
+);
 
 const lang = 'en_US';
 const frequency = config.pollInterval;
@@ -192,7 +198,8 @@ for (const winet of config.winets) {
     winet.user,
     winet.pass,
     winet.ssl,
-    analytics
+    analytics,
+    tlsPolicy
   );
 
   handler.setCallback((h, devices, deviceStatus) =>

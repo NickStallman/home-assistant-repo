@@ -160,3 +160,35 @@ test('invalid boolean fails without echoing its value', () => {
   assert.match(config.error, /Invalid SSL/);
   assert.doesNotMatch(config.error, /synthetic-private-input/);
 });
+
+test('certificate options resolve from JSON without environment settings', () => {
+  const config = load({
+    json: {...fileOptions, tls_ca_cert_base64: 'json-certificate', tls_server_name: 'json.example'},
+  });
+  assert.deepEqual(config.tls, {certificateBase64: 'json-certificate', serverName: 'json.example'});
+});
+
+test('certificate environment overrides JSON through the same loader', () => {
+  const config = load({
+    json: {...fileOptions, tls_ca_cert_base64: 'json-certificate', tls_server_name: 'json.example'},
+    env: {WINET_TLS_CA_CERT_BASE64: 'env-certificate', WINET_TLS_SERVER_NAME: 'env.example'},
+  });
+  assert.deepEqual(config.tls, {certificateBase64: 'env-certificate', serverName: 'env.example'});
+});
+
+test('dotenv certificate settings fill omissions without replacing process environment', () => {
+  const config = load({
+    json: fileOptions,
+    dotenv: 'WINET_TLS_CA_CERT_BASE64=dotenv-certificate\nWINET_TLS_SERVER_NAME=dotenv.example\n',
+    env: {WINET_TLS_CA_CERT_BASE64: 'env-certificate'},
+  });
+  assert.deepEqual(config.tls, {certificateBase64: 'env-certificate', serverName: 'dotenv.example'});
+});
+
+test('an explicit empty certificate overrides JSON trust', () => {
+  const config = load({
+    json: {...fileOptions, tls_ca_cert_base64: 'json-certificate'},
+    env: {WINET_TLS_CA_CERT_BASE64: ''},
+  });
+  assert.deepEqual(config.tls, {certificateBase64: ''});
+});

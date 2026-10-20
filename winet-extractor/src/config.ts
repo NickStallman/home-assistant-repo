@@ -15,6 +15,10 @@ export type Config = {
   analytics: boolean;
   siteTotals: boolean;
   winets: WinetConfig[];
+  tls: {
+    certificateBase64?: string;
+    serverName?: string;
+  };
 };
 
 type AdditionalWinet = {
@@ -35,6 +39,8 @@ type RawOptions = {
   ssl?: boolean;
   site_totals?: boolean;
   additional_winets?: AdditionalWinet[];
+  tls_ca_cert_base64?: string;
+  tls_server_name?: string;
 };
 
 const DEFAULT_USER = 'admin';
@@ -70,6 +76,8 @@ function readExplicitEnvironment(env: NodeJS.ProcessEnv): RawOptions {
     analytics: parseBool('ANALYTICS', env.ANALYTICS),
     ssl: parseBool('SSL', env.SSL),
     site_totals: parseBool('SITE_TOTALS', env.SITE_TOTALS),
+    tls_ca_cert_base64: env.WINET_TLS_CA_CERT_BASE64,
+    tls_server_name: env.WINET_TLS_SERVER_NAME,
   };
   // Omitted values must not erase JSON settings. Defaults belong to buildConfig.
   for (const key of Object.keys(options) as Array<keyof RawOptions>) {
@@ -123,6 +131,10 @@ export function buildConfig(options: RawOptions): Config {
     analytics: options.analytics ?? true,
     siteTotals: options.site_totals ?? true,
     winets,
+    tls: {
+      certificateBase64: options.tls_ca_cert_base64,
+      serverName: options.tls_server_name,
+    },
   };
 }
 

@@ -181,9 +181,52 @@ use `env_file` or `environment` to pass variables into the container; a Compose
 project's `.env` is not automatically the container's environment. Restart the
 container after changing configuration.
 
+### Optional certificate verification
+
+By default, WiNet's self-signed HTTPS/WSS connections retain the existing
+unverified behavior. To verify the device, obtain its certificate (or its issuing
+CA certificate) through a trusted channel and supply **one PEM certificate**,
+base64-encoded, as `WINET_TLS_CA_CERT_BASE64`. Do not include a private key.
+
+When connecting by IP, optionally set `WINET_TLS_SERVER_NAME` to the DNS name
+in the certificate. This supplies the expected hostname and TLS SNI; the
+connection still goes to `WINET_HOST`. Home Assistant add-on users can set the
+equivalent `tls_ca_cert_base64` and `tls_server_name` options. They follow the
+same configuration precedence as other settings.
+
+- A supplied certificate enables Node's native certificate-chain, expiry, and
+  hostname verification (`rejectUnauthorized: true`).
+- An absent or explicitly empty certificate retains unverified TLS
+  (`rejectUnauthorized: false`). An empty environment value also overrides any
+  JSON certificate, so omit the variable to preserve JSON trust.
+- Malformed certificates and invalid server names fail startup before MQTT,
+  analytics, or WiNet clients are created.
+- Explicit certificate or server-name configuration requires HTTPS/WSS and
+  prevents HTTP fallback. Server-name configuration alone does not enable
+  certificate verification.
+
+The same TLS policy covers property discovery, WebSockets, and register reads.
+Register reads continue to use fresh connections and retain upstream's failure
+lockouts. These global settings apply to **all configured WiNets**, including
+additional WiNets; their certificates must satisfy the same trust and hostname
+configuration.
+
+This does not install a certificate on the device. Connections require TLS 1.2
+or newer and can negotiate TLS 1.3 only when the device supports it.
+
 ### Development checks
 
-Run `npm ci` and `npm test` to compile, test configuration loading, and lint.
+Run `npm ci` and `npm test` to compile, test configuration and TLS, and lint.
+TLS tests require OpenSSL and bind synthetic servers to loopback only. They
+generate disposable certificates and keys; no device or broker is contacted.
+For the Linux image, add the OpenSSL fixture tool in a test-only layer:
+
+```sh
+docker build -t winet-extractor:test .
+docker build -f test/Dockerfile -t winet-extractor:tests .
+docker run --rm --network none winet-extractor:tests
+```
+
 To exercise the real s6 startup path with a built image, run
 `python3 test/container_startup.py <image>`. This check uses disposable containers
 with networking disabled and synthetic configuration.

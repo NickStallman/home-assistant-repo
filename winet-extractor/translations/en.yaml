@@ -35,6 +35,17 @@ configuration:
     description: >-
       With two or more inverters, publish a "WiNet Site" device that adds up
       PV power and yield across all of them.
+  tls_ca_cert_base64:
+    name: Trusted WiNet certificate (base64)
+    description: >-
+      Optional. Base64 of one PEM certificate from a trusted source. Enables
+      certificate and hostname verification for all WiNets. An invalid
+      certificate fails startup. Leave blank for existing unverified SSL behavior.
+  tls_server_name:
+    name: WiNet certificate hostname
+    description: >-
+      Optional. DNS name to verify and send as TLS SNI when connecting by IP.
+      Does not change the connection address. Used for all WiNets.
   additional_winets:
     name: Additional WiNets
     description: >-
