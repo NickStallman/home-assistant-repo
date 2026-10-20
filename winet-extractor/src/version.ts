@@ -14,7 +14,7 @@ export function getVersion(): string {
       if (match) {
         return match[1];
       }
-    } catch (err) {
+    } catch {
       // Try the next location
     }
   }

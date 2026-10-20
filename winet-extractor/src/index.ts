@@ -209,9 +209,7 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
     logger.info(`Received ${signal}, shutting down`);
     // Websockets and timers keep the event loop alive, so exit explicitly.
     // Don't hang around if the broker is unresponsive.
-    // eslint-disable-next-line n/no-process-exit
     setTimeout(() => process.exit(0), 3000).unref();
-    // eslint-disable-next-line n/no-process-exit
-    mqtt.shutdown().then(() => process.exit(0));
+    void mqtt.shutdown().then(() => process.exit(0));
   });
 }
