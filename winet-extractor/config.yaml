@@ -38,6 +38,8 @@ schema:
   poll_interval: int(1,3600)
   analytics: bool
   ssl: bool
+  tls_ca_cert_base64: str?
+  tls_server_name: str?
   site_totals: bool?
   additional_winets:
     - host: str

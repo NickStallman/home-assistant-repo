@@ -2,6 +2,7 @@ import * as http from 'http';
 import * as https from 'https';
 import {z} from 'zod';
 import {Device} from './types/MessageTypes';
+import {WinetTls} from './winetTls';
 
 // Raw register reads through the WiNet's "General parameters" HTTP endpoint.
 // It exposes registers of attached devices (e.g. battery cell voltages) that
@@ -76,6 +77,7 @@ export type RegisterConnection = {
   ssl: boolean;
   lang: string;
   token: string;
+  tlsPolicy?: WinetTls;
 };
 
 // The WiNet reads at most this many registers per request
@@ -112,6 +114,8 @@ export function readRegisters(
   block: Pick<RegisterBlock, 'addr' | 'count' | 'type'>,
   timeoutMs = 10000
 ): Promise<number[]> {
+  const tlsPolicy = conn.tlsPolicy ?? new WinetTls();
+  const ssl = conn.ssl || tlsPolicy.required;
   return new Promise((resolve, rejectWith) => {
     const reject = (reason: string, message: string) =>
       rejectWith(new RegisterReadError(reason, message));
@@ -131,17 +135,15 @@ export function readRegisters(
       .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
       .join('&');
     const url =
-      `${conn.ssl ? 'https' : 'http'}://${conn.host}` +
-      `/device/getParam?${query}`;
+      `${ssl ? 'https' : 'http'}://${conn.host}` + `/device/getParam?${query}`;
     // A new connection for every read. Node keeps connections alive by
     // default and the WiNet closes them, so a reused one fails with "socket
     // hang up" on the next read.
-    const options = conn.ssl
-      ? // Ignore self-signed certificate error
-        {agent: false as const, rejectUnauthorized: false}
+    const options = ssl
+      ? {agent: tlsPolicy.agent, headers: {Connection: 'close'}}
       : {agent: false as const};
 
-    const request = (conn.ssl ? https : http)
+    const request = (ssl ? https : http)
       .get(url, options, res => {
         let data = '';
         res.on('data', chunk => {
