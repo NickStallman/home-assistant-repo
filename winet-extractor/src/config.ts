@@ -48,9 +48,34 @@ export function splitHosts(hosts: string | undefined): string[] {
     .filter(h => h.length > 0);
 }
 
-function parseBool(value: string | undefined, fallback: boolean): boolean {
-  if (value === undefined || value === '') return fallback;
-  return ['true', '1', 'yes', 'on'].includes(value.toLowerCase());
+function parseBool(
+  name: string,
+  value: string | undefined
+): boolean | undefined {
+  if (value === undefined || value === '') return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+  if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+  throw new Error(`Invalid ${name}: expected a boolean`);
+}
+
+function readExplicitEnvironment(env: NodeJS.ProcessEnv): RawOptions {
+  const options: RawOptions = {
+    winet_host: env.WINET_HOST,
+    mqtt_url: env.MQTT_URL,
+    mqtt_prefix: env.MQTT_PREFIX,
+    winet_user: env.WINET_USER,
+    winet_pass: env.WINET_PASS,
+    poll_interval: env.POLL_INTERVAL,
+    analytics: parseBool('ANALYTICS', env.ANALYTICS),
+    ssl: parseBool('SSL', env.SSL),
+    site_totals: parseBool('SITE_TOTALS', env.SITE_TOTALS),
+  };
+  // Omitted values must not erase JSON settings. Defaults belong to buildConfig.
+  for (const key of Object.keys(options) as Array<keyof RawOptions>) {
+    if (options[key] === undefined) delete options[key];
+  }
+  return options;
 }
 
 export function buildConfig(options: RawOptions): Config {
@@ -102,25 +127,13 @@ export function buildConfig(options: RawOptions): Config {
 }
 
 export function loadConfig(optionsPath = '/data/options.json'): Config {
-  if (fs.existsSync(optionsPath)) {
-    const options: RawOptions = JSON.parse(
-      fs.readFileSync(optionsPath, 'utf8')
-    );
-    return buildConfig(options);
-  }
-
+  // dotenv leaves explicitly supplied process environment variables unchanged.
   dotenv.config();
-  const env = process.env;
+  const fileOptions: RawOptions = fs.existsSync(optionsPath)
+    ? JSON.parse(fs.readFileSync(optionsPath, 'utf8'))
+    : {};
   return buildConfig({
-    winet_host: env.WINET_HOST,
-    mqtt_url: env.MQTT_URL,
-    mqtt_prefix: env.MQTT_PREFIX,
-    winet_user: env.WINET_USER,
-    winet_pass: env.WINET_PASS,
-    poll_interval: env.POLL_INTERVAL,
-    // On by default, ANALYTICS=false opts out
-    analytics: parseBool(env.ANALYTICS, true),
-    ssl: parseBool(env.SSL, false),
-    site_totals: parseBool(env.SITE_TOTALS, true),
+    ...fileOptions,
+    ...readExplicitEnvironment(process.env),
   });
 }
