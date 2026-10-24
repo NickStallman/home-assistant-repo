@@ -307,7 +307,7 @@ export class winetHandler {
     let message: unknown;
     try {
       message = JSON.parse(data.toString());
-    } catch (err) {
+    } catch {
       this.logger.error(`Unparseable message: ${data.toString()}`);
       return;
     }
@@ -514,11 +514,9 @@ export class winetHandler {
           }
 
           const voltage = this.parseValue(data.voltage, true) as
-            | number
-            | undefined;
+            number | undefined;
           const current = this.parseValue(data.current, true) as
-            | number
-            | undefined;
+            number | undefined;
           const power =
             voltage === undefined || current === undefined
               ? undefined
@@ -861,7 +859,7 @@ export class winetHandler {
           finishCycle();
         } else {
           const ws = this.ws;
-          this.pollRegisterBlocks(polls).finally(() => {
+          void this.pollRegisterBlocks(polls).finally(() => {
             if (this.ws === ws) {
               finishCycle();
             }

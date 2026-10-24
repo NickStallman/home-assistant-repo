@@ -164,7 +164,7 @@ export function readRegisters(
           let json: unknown;
           try {
             json = JSON.parse(data);
-          } catch (err) {
+          } catch {
             reject('bad_json', 'the WiNet reply was not valid JSON');
             return;
           }
