@@ -158,6 +158,36 @@ Then run `./docker-compose-up.sh`. This is equivelant to `docker compose up` exc
 
 Once everything is running smoothly you can run it in detatched mode with `./docker-compose-up.sh -d`
 
+### Configuration precedence
+
+Settings are read once at startup, in this order (highest priority first):
+
+1. Environment variables supplied to the container or Node process.
+2. Values in `.env` in the application working directory.
+3. Home Assistant's `/data/options.json`, when present.
+4. The existing application defaults.
+
+Supported environment variables are `WINET_HOST`, `MQTT_URL`, `MQTT_PREFIX`,
+`WINET_USER`, `WINET_PASS`, `POLL_INTERVAL`, `ANALYTICS`, `SSL`, and `SITE_TOTALS`.
+An omitted variable leaves the JSON value intact. Boolean variables accept
+`true`/`false`, `1`/`0`, `yes`/`no`, and `on`/`off` (case insensitive);
+an empty boolean variable is ignored and any other value fails startup.
+An explicitly empty string overrides the corresponding JSON string, so an empty
+required host or MQTT URL can fail validation. Additional WiNets remain in JSON
+and continue to inherit the resolved primary settings where appropriate.
+
+The supplied Compose file mounts `.env` read-only. With your own Compose file,
+use `env_file` or `environment` to pass variables into the container; a Compose
+project's `.env` is not automatically the container's environment. Restart the
+container after changing configuration.
+
+### Development checks
+
+Run `npm ci` and `npm test` to compile, run the tests (configuration loading, and the session handling against a simulated WiNet) and lint.
+To exercise the real s6 startup path with a built image, run
+`python3 test/container_startup.py <image>`. This check uses disposable containers
+with networking disabled and synthetic configuration.
+
 ## Related Projects
 
 - [GoSungrow](https://github.com/MickMake/GoSungrow)
@@ -168,7 +198,7 @@ Once everything is running smoothly you can run it in detatched mode with `./doc
 
 Some anonymous analytics are collected to survey the use of this addon to see what Sungrow hardware it is working with and if any errors arise (e.g. for newer firmware versions). These analytics can be disabled on the Configuration tab of the addon.
 
-No personal information is collected, only various error states and Sungrow model names.
+No personal information is collected, only various error states and Sungrow model names. A repeating error is reported at most once an hour.
 
 ## Feedback
 

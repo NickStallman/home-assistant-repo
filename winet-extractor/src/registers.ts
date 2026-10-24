@@ -84,7 +84,15 @@ export const MAX_REGISTER_COUNT = 120;
 // Failures that can be a passing network glitch rather than the WiNet or the
 // device being unable to serve the read
 export function isTransientReadFailure(reason: string): boolean {
-  return reason === 'timeout' || reason.startsWith('network:');
+  return (
+    reason === 'timeout' ||
+    reason.startsWith('network:') ||
+    // 301 READ_FAILED: the WiNet couldn't get the value this time (battery
+    // stack off line or inverter busy), not necessarily an unknown address
+    reason.startsWith('winet:301:') ||
+    // Session token expired; the next websocket reply triggers a new login
+    /^winet:(120|110|106|121):/.test(reason)
+  );
 }
 
 const ParamSchema = z.object({
@@ -164,7 +172,7 @@ export function readRegisters(
           let json: unknown;
           try {
             json = JSON.parse(data);
-          } catch (err) {
+          } catch {
             reject('bad_json', 'the WiNet reply was not valid JSON');
             return;
           }

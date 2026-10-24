@@ -1,9 +1,9 @@
 {
   "devDependencies": {
-    "@types/node": "20.11.5",
+    "@types/node": "^22.20.5",
     "@types/ws": "^8.5.10",
     "@types/yargs": "^17.0.32",
-    "gts": "^5.3.0",
+    "gts": "^7.0.0",
     "typescript": "^5.4.5"
   },
   "scripts": {
@@ -14,17 +14,22 @@
     "fix": "gts fix",
     "prepare": "npm run compile",
     "pretest": "npm run compile",
+    "test": "node --test --test-force-exit test/*.test.cjs",
     "posttest": "npm run lint"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
-    "http": "^0.0.1-security",
-    "mqtt": "^5.5.2",
-    "posthog-node": "^4.0.1",
+    "mqtt": "^5.16.1",
+    "posthog-node": "^4.18.0",
     "slugify": "^1.6.6",
     "winston": "^3.13.0",
-    "ws": "^8.16.0",
+    "ws": "^8.22.0",
     "yargs": "^17.7.2",
     "zod": "^3.22.4"
+  },
+  "overrides": {
+    "external-editor": {
+      "tmp": "^0.2.7"
+    }
   }
 }

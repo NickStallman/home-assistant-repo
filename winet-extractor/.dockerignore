@@ -3,3 +3,4 @@ build
 .env
 data
 .claude
+test

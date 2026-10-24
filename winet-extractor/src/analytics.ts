@@ -2,6 +2,8 @@ import {PostHog} from 'posthog-node';
 import crypto from 'crypto';
 import {Device} from './types/MessageTypes';
 
+const THROTTLE_INTERVAL = 60 * 60 * 1000;
+
 export class Analytics {
   private id = '';
   private enabled: boolean;
@@ -11,6 +13,9 @@ export class Analytics {
   private winetVersions = new Map<string, number>();
   private devices = new Map<string, Device[]>();
   private devicePingInterval: NodeJS.Timeout | undefined = undefined;
+  // A repeating error or reconnect cause is reported once, then at most once
+  // an hour with a count of how often it happened in between
+  private throttled = new Map<string, {lastSent: number; suppressed: number}>();
 
   constructor(enabled: boolean, version: string) {
     this.enabled = enabled;
@@ -88,14 +93,36 @@ export class Analytics {
     this.winetVersions.set(host, version);
   }
 
+  // Send the event now if this key hasn't been sent in the last hour, or
+  // count it for later. Returns the count to attach when sending.
+  private throttle(key: string): number | undefined {
+    const now = Date.now();
+    const entry = this.throttled.get(key);
+    if (entry === undefined) {
+      this.throttled.set(key, {lastSent: now, suppressed: 0});
+      return 1;
+    }
+    if (now - entry.lastSent < THROTTLE_INTERVAL) {
+      entry.suppressed++;
+      return undefined;
+    }
+    const count = entry.suppressed + 1;
+    entry.lastSent = now;
+    entry.suppressed = 0;
+    return count;
+  }
+
   public registerError(type: string, error: string) {
     if (this.posthog && this.id.length > 0) {
+      const count = this.throttle(`error|${type}|${error}`);
+      if (count === undefined) return;
       this.posthog.capture({
         distinctId: this.id,
         event: 'error',
         properties: {
           type: type,
           error: error,
+          count,
           version: this.version,
           winetVersion: this.winetVersion,
         },
@@ -144,11 +171,14 @@ export class Analytics {
 
   public registerReconnect(type: string) {
     if (this.posthog && this.id.length > 0) {
+      const count = this.throttle(`reconnect|${type}`);
+      if (count === undefined) return;
       this.posthog.capture({
         distinctId: this.id,
         event: 'reconnect',
         properties: {
           type: type,
+          count,
           version: this.version,
           winetVersion: this.winetVersion,
         },
