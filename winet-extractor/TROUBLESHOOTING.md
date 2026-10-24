@@ -71,12 +71,11 @@ error: MQTT error: Error: connect ECONNREFUSED 192.168.1.x:1883
 error: Websocket error: Unexpected server response: 400
 ```
 
-**Cause:** Newer WiNet-S2 firmware requires SSL/HTTPS connections.
+**Cause:** Newer WiNet firmware only serves the websocket over SSL (port 443); older firmware only without (port 8082).
 
 **Solutions:**
-1. Set `ssl: true` in your addon configuration
-2. Update to addon version 0.2.0 or later which auto-detects SSL requirements
-3. Verify you're on the latest WiNet firmware
+1. Update to addon version 0.5.0 or later: if one scheme doesn't connect it tries the other ("Could not connect over ws:// (...), trying wss:// next")
+2. Or set `ssl: true` in your addon configuration to skip detection
 
 ### "read ECONNRESET" or "connect ETIMEDOUT"
 
@@ -95,6 +94,24 @@ error: Websocket error: connect ETIMEDOUT
 3. **Reboot the WiNet** - Use iSolarCloud app: Settings > Configuration Parameters > Remote Device Restart
 
 4. **Network issues** - Try accessing `https://<winet-ip>` in your browser. If that fails, it's not the addon.
+
+### "WiNet session timed out, logging in again"
+
+**Explanation:** The WiNet logs every session out about 10 minutes after login, however busy it is. Since 0.5.0 the addon logs in again on the same connection, which takes a second and keeps the entities available. Before 0.5.0 this appeared as "WiNet disconnect: Internal Error" followed by a reconnect roughly every 11 minutes. No action needed.
+
+### "Another client connected to the WiNet and it dropped this connection"
+
+**Symptoms:**
+```
+warn: [192.168.1.100] Another client connected to the WiNet and it dropped this connection. ... Reconnecting in 30s
+```
+
+**Explanation:** The WiNet allows one websocket client at a time. Whenever something else connects, every other client is logged out, so the addon reconnects, which in turn logs the other client out. Likely culprits: the WiNet web interface open in a browser, the iSolarCloud app on the same network, another Home Assistant integration that uses the WiNet's web API, or a second copy of this addon pointing at the same WiNet. From 0.5.0 the wait between attempts doubles while this keeps happening (up to 5 minutes) instead of both sides reconnecting every 30 seconds.
+
+**Solutions:**
+- Close the WiNet web interface or the app when you're done with it
+- Make sure only one integration talks to the WiNet's web API (Modbus TCP is separate and fine)
+- Check you haven't configured the same WiNet twice
 
 ### "Watchdog triggered" / "Reconnecting in Ns"
 
@@ -309,11 +326,11 @@ Older WiFi modules (v31) are not the same as WiNet-S/S2 and may not be supported
 - Increase poll_interval to reduce load
 - Check system resources on your Home Assistant host
 
-### WiNet web interface unusable while addon runs
+### WiNet web interface logs out while addon runs
 
-**Expected behavior:** The WiNet only supports one active session. The addon keeps a persistent connection, which logs out other users.
+**Expected behavior:** The WiNet only allows one websocket client. Logging in to the web interface drops the addon, and when the addon reconnects it logs the web interface out again. Since 0.5.0 the addon waits progressively longer between attempts (up to 5 minutes) while this keeps happening, which usually gives you enough time in the web interface.
 
-**Workaround:** Stop the addon temporarily when you need to access the WiNet web interface directly.
+**Workaround:** Stop the addon temporarily if you need the web interface for longer.
 
 ### Site totals don't appear
 

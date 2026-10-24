@@ -183,7 +183,7 @@ container after changing configuration.
 
 ### Development checks
 
-Run `npm ci` and `npm test` to compile, test configuration loading, and lint.
+Run `npm ci` and `npm test` to compile, run the tests (configuration loading, and the session handling against a simulated WiNet) and lint.
 To exercise the real s6 startup path with a built image, run
 `python3 test/container_startup.py <image>`. This check uses disposable containers
 with networking disabled and synthetic configuration.
@@ -198,7 +198,7 @@ with networking disabled and synthetic configuration.
 
 Some anonymous analytics are collected to survey the use of this addon to see what Sungrow hardware it is working with and if any errors arise (e.g. for newer firmware versions). These analytics can be disabled on the Configuration tab of the addon.
 
-No personal information is collected, only various error states and Sungrow model names.
+No personal information is collected, only various error states and Sungrow model names. A repeating error is reported at most once an hour.
 
 ## Feedback
 

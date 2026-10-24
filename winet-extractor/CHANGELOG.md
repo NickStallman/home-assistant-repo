@@ -1,3 +1,18 @@
+### 0.5.0
+
+- **Far fewer reconnects.** The WiNet logs every session out about 10 minutes after login no matter how busy it is, which showed up as "WiNet disconnect: Internal Error" and a reconnect roughly every 11 minutes on most WiNet-S2s. The addon now logs in again on the same connection ("WiNet session timed out, logging in again"), so data keeps flowing and entities never blip
+- When another client takes over the WiNet (its web interface, the iSolarCloud app on your network, another integration or a second copy of this addon) the log now says so, and the addon waits longer between attempts rather than fighting over the connection every 30 seconds. The WiNet only allows one client at a time, and that includes the addon itself: its reconnects log out the web interface too
+- WiNets that only accept secure connections are detected reliably. Some installs looped on "connect ECONNREFUSED ...:8082" because the WiNet answered the plain HTTP check but only serves the websocket over SSL. If one scheme doesn't connect the addon now tries the other
+- A device that can't answer one type of query no longer disconnects everything; the addon logs it once per cycle and carries on with the other values
+- MPPT string data from inverters that leave out a value or unit for unused strings (seen on SG15RT, SG50RT, SG10RT and SH50RT) is accepted instead of being logged as invalid every 10 seconds
+- The WiNet's own status broadcasts are no longer logged as unknown messages, and a device-list broadcast no longer interrupts a running poll cycle
+- Battery cell reads that the WiNet refuses with "Readback failed" (code 301) are retried a few times before the sensors are turned off, as the cause is usually a stack that's temporarily off line
+- Settings can be overridden with environment variables (`WINET_HOST`, `MQTT_URL`, ...), handy for standalone Docker. Thanks @theaussiepom (#93)
+- Updated dependencies, and a smaller image that no longer ships the build tools (#95, #97). Thanks @theaussiepom
+- Session tokens are never written to the log
+- Anonymous analytics report a repeating error once, then at most once an hour with a count, and every reconnect now carries its cause
+- A small test suite with a simulated WiNet covers session timeouts, reconnect backoff and the new schemas (`npm test`)
+
 ### 0.4.1
 
 - Fixed battery cell reads failing every other time on some WiNets ("socket hang up"). The addon reused a connection the WiNet had already closed, it now opens a new one for each read
