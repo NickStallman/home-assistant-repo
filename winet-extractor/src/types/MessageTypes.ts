@@ -15,7 +15,7 @@ export const ConnectSchema = z.object({
   token: z.string(),
   uid: z.number().int(),
   tips_disable: z.number().int().optional(),
-  ip: z.string().ip().optional(),
+  ip: z.string().optional(),
   virgin_flag: z.number().int().optional(),
   isFirstLogin: z.number().int().optional(),
   forceModifyPasswd: z.number().int().optional(),
@@ -24,7 +24,8 @@ export const ConnectSchema = z.object({
 export const LoginSchema = z.object({
   service: z.string(),
   token: z.string(),
-  uid: z.number().int(),
+  // Only the token is used; some firmware sends uid as a string
+  uid: z.union([z.number(), z.string()]).optional(),
 });
 
 export const DeviceSchema = z.object({
@@ -66,21 +67,23 @@ export const DataSchema = z.object({
 export const RealtimeSchema = z.object({
   service: z.union([z.literal('real'), z.literal('real_battery')]),
   list: z.array(DataSchema),
-  count: z.number().int(),
+  count: z.number().int().optional(),
 });
 
+// Some inverters (SG15RT, SG50RT, SG10RT, SH50RT) leave out a value or unit
+// for strings they don't have; "--" is what the WiNet sends for no value
 export const DirectItemSchema = z.object({
   name: z.string(),
-  voltage: z.string(),
-  voltage_unit: z.string(),
-  current: z.string(),
-  current_unit: z.string(),
+  voltage: z.string().optional().default('--'),
+  voltage_unit: z.string().optional().default(''),
+  current: z.string().optional().default('--'),
+  current_unit: z.string().optional().default(''),
 });
 
 export const DirectSchema = z.object({
   service: z.literal('direct'),
   list: z.array(DirectItemSchema),
-  count: z.number().int(),
+  count: z.number().int().optional(),
 });
 
 export type Device = z.infer<typeof DeviceSchema>;

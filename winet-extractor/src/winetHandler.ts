@@ -39,6 +39,17 @@ const REGISTER_DROP_STRIKES = 2;
 // Network glitches in a row before a register block is turned off. A read the
 // WiNet answers with a refusal or with bad data turns it off straight away.
 const REGISTER_TRANSIENT_FAILURES = 3;
+// Result codes the WiNet answers with once the session token has expired or
+// been cleared. It renders them all as I18N_COMMON_INTER_ABNORMAL.
+const TOKEN_ERROR_CODES = new Set([120, 110, 106, 121]);
+
+// Session tokens must never end up in the log
+function redactToken(message: unknown): unknown {
+  if (typeof message !== 'object' || message === null) return message;
+  const m = message as {result_data?: Record<string, unknown>};
+  if (typeof m.result_data !== 'object' || m.result_data === null) return m;
+  return {...m, result_data: {...m.result_data, token: '<redacted>'}};
+}
 
 export type StatusCallback = (
   handler: winetHandler,
@@ -61,6 +72,10 @@ export class winetHandler {
   private logger: Winston.Logger;
   private properties: Properties = {};
   private ssl: boolean;
+  // ssl came from the configuration rather than detection
+  private sslForced: boolean;
+  // A connect reply arrived over the current scheme, so stop probing
+  private sslConfirmed = false;
   private lang: string;
   private frequency: number;
   private callbackUpdatedStatus?: StatusCallback;
@@ -81,6 +96,8 @@ export class winetHandler {
   private deviceStatus: Record<string, DeviceStatusMap> = {};
   private skippedDevices = new Set<string>();
   private stallCount = 0;
+  // A fresh login on the same socket is in progress (session timed out)
+  private reloggingIn = false;
   private lastData: number | undefined = undefined;
   private winetVersion: number | undefined = undefined;
   private connected = false;
@@ -116,6 +133,7 @@ export class winetHandler {
     this.logger = logger;
     this.host = host;
     this.ssl = ssl;
+    this.sslForced = ssl;
     this.lang = lang;
     this.frequency = frequency;
     this.winetUser = winetUser || 'admin';
@@ -190,6 +208,7 @@ export class winetHandler {
     this.inFlightDevice = undefined;
     this.currentStages = [];
     this.stallCount = 0;
+    this.reloggingIn = false;
     this.winetVersion = undefined;
     this.lastData = Date.now();
 
@@ -200,8 +219,7 @@ export class winetHandler {
         this.lastData !== undefined &&
         Date.now() - this.lastData > this.frequency * 1000 * 6
       ) {
-        this.analytics.registerReconnect('watchdog');
-        this.reconnect('Watchdog triggered, no data received');
+        this.reconnect('Watchdog triggered, no data received', 'watchdog');
       }
     }, this.frequency * 1000);
 
@@ -222,17 +240,19 @@ export class winetHandler {
     ws.on('error', this.onError.bind(this));
     ws.on('close', (code: number) => {
       if (this.ws === ws) {
-        this.reconnect(`Websocket closed (${code})`);
+        this.reconnect(`Websocket closed (${code})`, 'websocket_closed');
       }
     });
   }
 
   // Tear down the connection and try again later. Safe to call repeatedly.
-  public reconnect(reason: string): void {
+  // The cause is reported in the anonymous analytics.
+  public reconnect(reason: string, cause = 'other'): void {
     if (this.reconnectTimer !== undefined) {
       return;
     }
 
+    this.analytics.registerReconnect(cause);
     this.noteDropAfterRegisterPoll();
     this.closeSocket();
     this.clearTimers();
@@ -242,6 +262,11 @@ export class winetHandler {
       MAX_RECONNECT_DELAY
     );
     this.reconnectAttempts++;
+    // Two failures in a row: the WiNet may have changed scheme (firmware
+    // update), so allow the ws/wss probe to run again
+    if (this.reconnectAttempts >= 2) {
+      this.sslConfirmed = false;
+    }
     this.logger.warn(`${reason}. Reconnecting in ${Math.round(delay / 1000)}s`);
 
     // Allow a quick reconnect to happen without flagging the data as stale
@@ -273,6 +298,8 @@ export class winetHandler {
     });
 
     this.scanInterval = setInterval(() => {
+      // Nothing can be sent until the new token arrives
+      if (this.reloggingIn) return;
       if (this.currentDevice === undefined && this.devices.length > 0) {
         this.scanDevices();
       }
@@ -280,9 +307,46 @@ export class winetHandler {
   }
 
   private onError(error: Error) {
-    this.logger.error(`Websocket error: ${error.message}`);
+    // Current WiNet firmware only serves the websocket over wss://443, older
+    // firmware only over ws://8082. If the detected scheme doesn't connect,
+    // try the other one next time.
+    if (!this.sslForced && !this.sslConfirmed) {
+      const code = (error as NodeJS.ErrnoException).code ?? error.message;
+      this.ssl = !this.ssl;
+      this.logger.warn(
+        `Could not connect over ${this.ssl ? 'ws' : 'wss'}:// (${code}), ` +
+          `trying ${this.ssl ? 'wss' : 'ws'}:// next`
+      );
+    } else {
+      this.logger.error(`Websocket error: ${error.message}`);
+    }
     this.analytics.registerError('websocket_onError', error.message);
-    this.reconnect('Websocket error');
+    this.reconnect('Websocket error', 'websocket_error');
+  }
+
+  // The WiNet logs a session out about 10 minutes after login no matter how
+  // busy it is, then answers every request with a token error. Logging in
+  // again on the same socket gets a new token without dropping the connection.
+  private relogin(reason: string): void {
+    if (this.reloggingIn || this.ws?.readyState !== Websocket.OPEN) {
+      return;
+    }
+    this.reloggingIn = true;
+    // Start the next poll cycle from the top once the new token arrives.
+    // During a register read the cycle finishes on its own.
+    if (!this.registerPollActive) {
+      this.currentDevice = undefined;
+      this.currentStages = [];
+    }
+    this.inFlightDevice = undefined;
+    this.stallCount = 0;
+    this.logger.info(`${reason}, logging in again`);
+    this.analytics.registerReconnect('relogin');
+    this.sendPacket({
+      service: 'login',
+      passwd: this.winetPass,
+      username: this.winetUser,
+    });
   }
 
   private translate(value: string): string {
@@ -322,18 +386,26 @@ export class winetHandler {
     }
 
     const typedMessage = validationResult.data;
-
-    if (typedMessage.result_msg === 'I18N_COMMON_INTER_ABNORMAL') {
-      this.analytics.registerError('winetError', 'INTER_ABNORMAL');
-      this.reconnect('WiNet disconnect: Internal Error');
-      return;
-    }
-
     this.lastData = Date.now();
 
     const result_code = typedMessage.result_code;
     const result_data = typedMessage.result_data;
     const service = result_data.service;
+
+    if (typedMessage.result_msg === 'I18N_COMMON_INTER_ABNORMAL') {
+      if (TOKEN_ERROR_CODES.has(result_code)) {
+        // The session expired (usually right after notice 103). Replies to
+        // requests already in flight arrive while the new login is pending.
+        if (!this.reloggingIn) {
+          this.analytics.registerError('winetError', 'tokenRejected');
+          this.relogin('WiNet rejected the session token');
+        }
+        return;
+      }
+      this.analytics.registerError('winetError', 'INTER_ABNORMAL');
+      this.reconnect('WiNet disconnect: Internal Error', 'winet_error');
+      return;
+    }
 
     switch (service) {
       case 'connect': {
@@ -341,11 +413,12 @@ export class winetHandler {
         if (!connectResult.success) {
           this.analytics.registerError('connectSchema', 'successFalse');
           this.logger.error('Invalid connect message:', {
-            data: message,
+            data: redactToken(message),
           });
           return;
         }
         const connectData = connectResult.data;
+        this.sslConfirmed = true;
 
         if (connectData.ip === undefined) {
           this.logger.info('Connected to a older Winet-S device');
@@ -375,13 +448,15 @@ export class winetHandler {
         break;
       }
       case 'login': {
+        const wasRelogin = this.reloggingIn;
+        this.reloggingIn = false;
         if (result_code !== 1) {
           this.analytics.registerError('loginSchema', 'resultCodeFail');
           this.logger.error(
             `Failed to authenticate (${typedMessage.result_msg ?? result_code}). ` +
               'Check the WiNet username and password.'
           );
-          this.reconnect('Authentication failed');
+          this.reconnect('Authentication failed', 'auth_failed');
           return;
         }
 
@@ -389,13 +464,15 @@ export class winetHandler {
         if (!loginResult.success) {
           this.analytics.registerError('loginSchema', 'successFalse');
           this.logger.error('Invalid login message:', {
-            data: message,
+            data: redactToken(message),
           });
-          this.reconnect('Invalid login response');
+          this.reconnect('Invalid login response', 'auth_failed');
           return;
         }
 
-        this.logger.info('Authenticated successfully');
+        this.logger.info(
+          wasRelogin ? 'Logged in again' : 'Authenticated successfully'
+        );
         this.token = loginResult.data.token;
 
         this.sendPacket({
@@ -412,20 +489,24 @@ export class winetHandler {
           this.logger.error('Invalid devicelist message:', {
             data: message,
           });
-          this.reconnect('Invalid device list');
+          this.reconnect('Invalid device list', 'protocol');
           return;
         }
         this.updateDeviceList(deviceListResult.data.list);
 
         if (this.devices.length === 0) {
-          this.reconnect('No supported devices found');
+          this.reconnect('No supported devices found', 'protocol');
           return;
         }
 
-        this.reconnectAttempts = 0;
         this.setConnected(true);
         this.analytics.registerDevices(this.host, this.devices);
 
+        // The WiNet also sends the list unasked when its devices change.
+        // Don't start a second query cycle on top of the running one.
+        if (this.currentDevice !== undefined) {
+          break;
+        }
         this.scanDevices();
         break;
       }
@@ -436,6 +517,16 @@ export class winetHandler {
 
         if (receivedDevice === undefined) {
           this.logger.error('Received realtime data without a current device');
+          return;
+        }
+
+        if (result_code !== 1) {
+          this.stageFailed(
+            receivedDevice,
+            service,
+            result_code,
+            typedMessage.result_msg
+          );
           return;
         }
 
@@ -484,6 +575,16 @@ export class winetHandler {
           return;
         }
 
+        if (result_code !== 1) {
+          this.stageFailed(
+            receivedDevice,
+            service,
+            result_code,
+            typedMessage.result_msg
+          );
+          return;
+        }
+
         const directResult = DirectSchema.safeParse(result_data);
         if (!directResult.success) {
           this.analytics.registerError('directSchema', 'successFalse');
@@ -529,14 +630,14 @@ export class winetHandler {
             name: nameV,
             slug: slugOf(nameV),
             value: voltage,
-            unit: data.voltage_unit,
+            unit: data.voltage_unit || 'V',
             numeric: true,
           });
           this.updateDeviceStatus(receivedDevice, {
             name: nameA,
             slug: slugOf(nameA),
             value: current,
-            unit: data.current_unit,
+            unit: data.current_unit || 'A',
             numeric: true,
           });
           this.updateDeviceStatus(receivedDevice, {
@@ -565,8 +666,28 @@ export class winetHandler {
       }
       case 'notice': {
         this.analytics.registerError('notice', result_code + '');
-        if (result_code === 100) {
-          this.reconnect('Websocket got timed out');
+        if (result_code === 103) {
+          this.relogin('WiNet session timed out');
+        } else if (result_code === 100) {
+          this.reconnect(
+            'Another client connected to the WiNet and it dropped this ' +
+              'connection. The WiNet allows one client at a time: its web ' +
+              'interface, the iSolarCloud app, another integration or a ' +
+              'second copy of this addon',
+            'evicted'
+          );
+        } else if (result_code === 101) {
+          this.reconnect(
+            'Someone logged in to the WiNet elsewhere with the same ' +
+              'credentials, which dropped this connection',
+            'evicted'
+          );
+        } else if (result_code === 108) {
+          this.reconnect(
+            'The iSolarCloud app connected to the WiNet, which drops every ' +
+              'other client',
+            'evicted'
+          );
         } else {
           this.logger.error('Received notice', {
             data: message,
@@ -574,10 +695,29 @@ export class winetHandler {
         }
         break;
       }
+      case 'state':
+        // Status broadcast (fault counts, link state), not needed
+        break;
       default:
         this.analytics.registerError('unknownService', service);
         this.logger.error('Received unknown message:', {data: message});
     }
+  }
+
+  // A device answered one query type with an error. The other query types
+  // and devices are unaffected, so carry on with the cycle.
+  private stageFailed(
+    devId: number,
+    service: string,
+    code: number,
+    msg: string | undefined
+  ) {
+    this.analytics.registerError('stageFailed', `${service}/${code}`);
+    this.logger.warn(
+      `${this.describeDevice(devId)} did not answer ${service} ` +
+        `(code ${code}${msg ? `, ${msg}` : ''})`
+    );
+    this.scanDevices();
   }
 
   private updateDeviceList(list: Device[]) {
@@ -832,7 +972,7 @@ export class winetHandler {
       this.stallCount++;
       if (this.stallCount > 5) {
         this.analytics.registerError('scanDevices', 'watchdogTriggered');
-        this.reconnect('Query timed out');
+        this.reconnect('Query timed out', 'stall');
       }
       return;
     }
@@ -849,6 +989,8 @@ export class winetHandler {
       if (currentIndex === -1 || nextIndex >= this.devices.length) {
         const finishCycle = () => {
           this.currentDevice = undefined;
+          // A full cycle of answers is the only proof the connection is good
+          this.reconnectAttempts = 0;
           this.callbackUpdatedStatus?.(this, this.devices, this.deviceStatus);
         };
 
