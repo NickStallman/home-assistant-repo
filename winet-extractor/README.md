@@ -1,5 +1,15 @@
 # Sungrow WiNet S/WiNet S2 Extraction Tool
 
+> [!IMPORTANT]
+> **New project: [Rewired-S](https://github.com/NickStallman/Rewired-S)** is an open-source replacement
+> firmware for the WiNet-S and WiNet-S2 dongle itself. It polls the inverter and batteries directly over
+> RS485, publishes every device to Home Assistant over MQTT discovery (the same entity scheme as this
+> add-on), keeps the iSolarCloud connection and the Modbus-TCP server working, and adds a local web UI with
+> inverter controls. It is alpha quality and currently tested on the SH10RS, SG5.0RS and SBR batteries.
+>
+> My time is shifting to the firmware, so **updates to this add-on will be less frequent**. The add-on keeps
+> working as it is, and bug reports are still welcome.
+
 ## What is this tool
 
 Some Sungrow inverters such as the SH10RS do not expose their metrics in a clean way. They do support Modbus but various values are missing making that integration unusable. It's also possible to access the metrics via cloud, however this results in 5 minute delayed data and requires internet access.
